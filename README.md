@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # [Horizon UI ⚡️](https://horizon-ui.com/horizon-ui-chakra) [![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social&logo=twitter)](https://twitter.com/intent/tweet?url=https://horizon-ui.com/&text=Check%20Horizon%20UI,%20the%20trendiest%20open-source%20admin%20template%20for%20Chakra%20UI%20&%20React!)
 
 ![version](https://img.shields.io/badge/version-3.0.0-brightgreen.svg)
@@ -112,3 +113,7 @@ new people that already use Horizon UI!
 ⭐️ [Copyright 2023 Simmmple ](https://www.simmmple.com/?ref=readme-horizon)
 
 📄 [Horizon UI License](https://www.simmmple.com/licenses?ref=readme-horizon)
+=======
+# HUB-sport
+Hub for sports
+>>>>>>> c1afb8bc78b9daafabd67f3fb76bdbcc62fbc6ae
