@@ -7,7 +7,6 @@ import { ChakraProvider } from '@chakra-ui/react';
 import initialTheme from './theme/theme';
 import { useState } from 'react';
 import { MsalProvider } from '@azure/msal-react';
-import { msalInstance } from './index';
 
 export default function App({ msalInstance }) {
   const [currentTheme, setCurrentTheme] = useState(initialTheme);
