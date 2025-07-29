@@ -1,4 +1,5 @@
-// Chakra imports
+// views/admin/default/components/WeeklyRevenue.jsx
+
 import {
   Box,
   Button,
@@ -11,16 +12,9 @@ import Card from "components/card/Card.js";
 // Custom components
 import BarChart from "components/charts/BarChart";
 import React from "react";
-import {
-  barChartDataConsumption,
-  barChartOptionsConsumption,
-} from "variables/charts";
 import { MdBarChart } from "react-icons/md";
 
-export default function WeeklyRevenue(props) {
-  const { ...rest } = props;
-
-  // Chakra Color Mode
+export default function WeeklyRevenue({ data = [] }) {
   const textColor = useColorModeValue("secondaryGray.900", "white");
   const iconColor = useColorModeValue("brand.500", "white");
   const bgButton = useColorModeValue("secondaryGray.300", "whiteAlpha.100");
@@ -32,8 +26,50 @@ export default function WeeklyRevenue(props) {
     { bg: "secondaryGray.300" },
     { bg: "whiteAlpha.100" }
   );
+
+  const chartData = [
+    {
+      name: "Försäljning",
+      data: data.map(d => d.amount),
+    },
+  ];
+
+  const chartOptions = {
+    chart: {
+      toolbar: { show: false },
+    },
+    tooltip: { theme: "dark" },
+    dataLabels: { enabled: false },
+    stroke: { curve: "smooth" },
+    xaxis: {
+      type: "numeric",
+      categories: data.map(d => d.day),
+      labels: { style: { colors: "#A3AED0", fontSize: "12px" } },
+    },
+    yaxis: {
+      labels: { style: { colors: "#A3AED0", fontSize: "12px" } },
+    },
+    legend: { show: false },
+    fill: {
+      type: "gradient",
+      gradient: {
+        shade: "light",
+        type: "vertical",
+        shadeIntensity: 0.5,
+        gradientToColors: undefined,
+        inverseColors: true,
+        opacityFrom: 0.8,
+        opacityTo: 0,
+        stops: [],
+      },
+      colors: ["#4318FF", "#6AD2FF"],
+    },
+    colors: ["#4318FF", "#6AD2FF"],
+    grid: { strokeDashArray: 5 },
+  };
+
   return (
-    <Card align='center' direction='column' w='100%' {...rest}>
+    <Card align='center' direction='column' w='100%'>
       <Flex align='center' w='100%' px='15px' py='10px'>
         <Text
           me='auto'
@@ -41,7 +77,7 @@ export default function WeeklyRevenue(props) {
           fontSize='xl'
           fontWeight='700'
           lineHeight='100%'>
-          Weekly Revenue
+          Veckoförsäljning
         </Text>
         <Button
           align='center'
@@ -53,16 +89,15 @@ export default function WeeklyRevenue(props) {
           w='37px'
           h='37px'
           lineHeight='100%'
-          borderRadius='10px'
-          {...rest}>
+          borderRadius='10px'>
           <Icon as={MdBarChart} color={iconColor} w='24px' h='24px' />
         </Button>
       </Flex>
 
       <Box h='240px' mt='auto'>
         <BarChart
-          chartData={barChartDataConsumption}
-          chartOptions={barChartOptionsConsumption}
+          chartData={chartData}
+          chartOptions={chartOptions}
         />
       </Box>
     </Card>

@@ -1,4 +1,6 @@
-// Chakra imports
+// views/admin/default/components/TotalSpent.jsx
+
+import React from "react";
 import {
   Box,
   Button,
@@ -10,21 +12,12 @@ import {
 // Custom components
 import Card from "components/card/Card.js";
 import LineChart from "components/charts/LineChart";
-import React from "react";
 import { IoCheckmarkCircle } from "react-icons/io5";
 import { MdBarChart, MdOutlineCalendarToday } from "react-icons/md";
 // Assets
 import { RiArrowUpSFill } from "react-icons/ri";
-import {
-  lineChartDataTotalSpent,
-  lineChartOptionsTotalSpent,
-} from "variables/charts";
 
-export default function TotalSpent(props) {
-  const { ...rest } = props;
-
-  // Chakra Color Mode
-
+export default function TotalSpent({ data = [], total = 0, growth = 0 }) {
   const textColor = useColorModeValue("secondaryGray.900", "white");
   const textColorSecondary = useColorModeValue("secondaryGray.600", "white");
   const boxBg = useColorModeValue("secondaryGray.300", "whiteAlpha.100");
@@ -38,14 +31,55 @@ export default function TotalSpent(props) {
     { bg: "secondaryGray.300" },
     { bg: "whiteAlpha.100" }
   );
+
+  const chartData = [
+    {
+      name: "Försäljning",
+      data: data.map(d => d.amount),
+    },
+  ];
+
+  const chartOptions = {
+    chart: {
+      toolbar: { show: false },
+    },
+    tooltip: { theme: "dark" },
+    dataLabels: { enabled: false },
+    stroke: { curve: "smooth" },
+    xaxis: {
+      type: "datetime",
+      categories: data.map(d => d.date),
+      labels: { style: { colors: "#A3AED0", fontSize: "12px" } },
+    },
+    yaxis: {
+      labels: { style: { colors: "#A3AED0", fontSize: "12px" } },
+    },
+    legend: { show: false },
+    grid: { strokeDashArray: 5 },
+    fill: {
+      type: "gradient",
+      gradient: {
+        shade: "light",
+        type: "vertical",
+        shadeIntensity: 0.5,
+        gradientToColors: undefined,
+        inverseColors: true,
+        opacityFrom: 0.8,
+        opacityTo: 0,
+        stops: [],
+      },
+      colors: ["#4318FF", "#6AD2FF"],
+    },
+    colors: ["#4318FF", "#6AD2FF"],
+  };
+
   return (
     <Card
       justifyContent='center'
       align='center'
       direction='column'
       w='100%'
-      mb='0px'
-      {...rest}>
+      mb='0px'>
       <Flex justify='space-between' ps='0px' pe='20px' pt='5px'>
         <Flex align='center' w='100%'>
           <Button
@@ -59,7 +93,7 @@ export default function TotalSpent(props) {
               color={textColorSecondary}
               me='4px'
             />
-            This month
+            Denna månad
           </Button>
           <Button
             ms='auto'
@@ -72,8 +106,7 @@ export default function TotalSpent(props) {
             w='37px'
             h='37px'
             lineHeight='100%'
-            borderRadius='10px'
-            {...rest}>
+            borderRadius='10px'>
             <Icon as={MdBarChart} color={iconColor} w='24px' h='24px' />
           </Button>
         </Flex>
@@ -86,7 +119,7 @@ export default function TotalSpent(props) {
             textAlign='start'
             fontWeight='700'
             lineHeight='100%'>
-            $37.5K
+            {total} kr
           </Text>
           <Flex align='center' mb='20px'>
             <Text
@@ -95,12 +128,12 @@ export default function TotalSpent(props) {
               fontWeight='500'
               mt='4px'
               me='12px'>
-              Total Spent
+              Total Försäljning
             </Text>
             <Flex align='center'>
               <Icon as={RiArrowUpSFill} color='green.500' me='2px' mt='2px' />
               <Text color='green.500' fontSize='sm' fontWeight='700'>
-                +2.45%
+                +{growth}%
               </Text>
             </Flex>
           </Flex>
@@ -114,8 +147,8 @@ export default function TotalSpent(props) {
         </Flex>
         <Box minH='260px' minW='75%' mt='auto'>
           <LineChart
-            chartData={lineChartDataTotalSpent}
-            chartOptions={lineChartOptionsTotalSpent}
+            chartData={chartData}
+            chartOptions={chartOptions}
           />
         </Box>
       </Flex>
