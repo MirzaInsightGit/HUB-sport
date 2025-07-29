@@ -28,9 +28,9 @@ const routes = [
     component: <MainDashboard />,
   },
   {
-    name: 'NFT Marketplace',
+    name: 'Distrikt',
     layout: '/admin',
-    path: '/nft-marketplace',
+    path: '/distrikt',
     icon: (
       <Icon
         as={MdOutlineShoppingCart}
@@ -64,9 +64,9 @@ const routes = [
     component: <SignInCentered />,
   },
   {
-    name: 'RTL Admin',
+    name: 'Till Bästa Omer',
     layout: '/rtl',
-    path: '/rtl-default',
+    path: '/till-omer',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <RTL />,
   },
