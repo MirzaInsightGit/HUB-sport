@@ -64,9 +64,9 @@ const routes = [
     component: <SignInCentered />,
   },
   {
-    name: 'Till Omer',
+    name: 'Till Bästa Omer',
     layout: '/rtl',
-    path: '/rtl-default',
+    path: '/till-omer',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <RTL />,
   },
