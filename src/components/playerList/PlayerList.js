@@ -1,13 +1,25 @@
+<<<<<<< HEAD
 import React, { useState, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'; // Singular: AllCommunityModule
+=======
+import React, { useState, useEffect, useCallback } from 'react';
+import { AgGridReact } from 'ag-grid-react';
+import 'ag-grid-community/styles/ag-grid.css';
+import 'ag-grid-community/styles/ag-theme-quartz.css';
+import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+>>>>>>> bc56f292813f36e825a919ba1bdfb6ad8c4936a5
 import axios from 'axios';
 import { Card, Heading, Flex, Button, Text, useColorModeValue } from "@chakra-ui/react";
 import { CosmosClient } from '@azure/cosmos';
 
+<<<<<<< HEAD
 ModuleRegistry.registerModules([AllCommunityModule]); // Singular
+=======
+ModuleRegistry.registerModules([AllCommunityModule]);
+>>>>>>> bc56f292813f36e825a919ba1bdfb6ad8c4936a5
 
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
@@ -20,11 +32,15 @@ const PlayerList = () => {
   const database = cosmosClient.database('HUBSportDB');
   const container = database.container('Players');
 
+<<<<<<< HEAD
   useEffect(() => {
     fetchPlayers();
   }, []);
 
   const fetchPlayers = async () => {
+=======
+  const fetchPlayers = useCallback(async () => {
+>>>>>>> bc56f292813f36e825a919ba1bdfb6ad8c4936a5
     const baseUrl = process.env.REACT_APP_WC_URL;
     if (!baseUrl) {
       console.error('REACT_APP_WC_URL is not defined in .env');
@@ -64,7 +80,15 @@ const PlayerList = () => {
     } catch (error) {
       console.error('Error fetching players:', error.response ? error.response.data : error.message);
     }
+<<<<<<< HEAD
   };
+=======
+  }, [container]);
+
+  useEffect(() => {
+    fetchPlayers();
+  }, [fetchPlayers]);
+>>>>>>> bc56f292813f36e825a919ba1bdfb6ad8c4936a5
 
   const onCellValueChanged = async (params) => {
     const { data } = params;

@@ -29,7 +29,9 @@ const routes = [
   },
   {
     name: 'Distrikt',
+    name: 'Distrikt',
     layout: '/admin',
+    path: '/distrikt',
     path: '/distrikt',
     icon: (
       <Icon
@@ -66,7 +68,7 @@ const routes = [
   {
     name: 'Till Omer',
     layout: '/rtl',
-    path: '/rtl-default',
+    path: '/till-omer',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <RTL />,
   },
