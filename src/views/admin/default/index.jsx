@@ -56,7 +56,6 @@ import {
   MdBarChart,
   MdFileCopy,
 } from "react-icons/md";
-import CheckTable from "views/admin/default/components/CheckTable";
 import ComplexTable from "views/admin/default/components/ComplexTable";
 import DailyTraffic from "views/admin/default/components/DailyTraffic";
 import PieCard from "views/admin/default/components/PieCard";
@@ -64,10 +63,8 @@ import Tasks from "views/admin/default/components/Tasks";
 import TotalSpent from "views/admin/default/components/TotalSpent";
 import WeeklyRevenue from "views/admin/default/components/WeeklyRevenue";
 import {
-  columnsDataCheck,
   columnsDataComplex,
 } from "views/admin/default/variables/columnsData";
-import tableDataCheck from "views/admin/default/variables/tableDataCheck.json";
 import tableDataComplex from "views/admin/default/variables/tableDataComplex.json";
 import axios from "axios";
 
