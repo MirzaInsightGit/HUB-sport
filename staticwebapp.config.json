@@ -1,0 +1,16 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/api/*", "*.{png,jpg,svg,gif,ico,css,js}"]
+  },
+  "routes": [
+    {
+      "route": "/admin/*",
+      "serve": "/index.html"
+    },
+    {
+      "route": "/auth/*",
+      "serve": "/index.html"
+    }
+  ]
+}
