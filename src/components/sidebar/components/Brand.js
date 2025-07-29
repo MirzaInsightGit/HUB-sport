@@ -4,16 +4,15 @@ import React from "react";
 import { Flex, useColorModeValue } from "@chakra-ui/react";
 
 // Custom components
-import { HorizonLogo } from "components/icons/Icons";
+import HorizonLogo from "assets/img/Stockholm-BDF-Gra-Liggande-2.png";
 import { HSeparator } from "components/separator/Separator";
 
 export function SidebarBrand() {
-  //   Chakra color mode
   let logoColor = useColorModeValue("navy.700", "white");
 
   return (
     <Flex align='center' direction='column'>
-      <HorizonLogo h='26px' w='175px' my='32px' color={logoColor} />
+      <img src={HorizonLogo} alt="Stockholm Basket Logo" style={{ height: '30px', width: '150px', margin: '32px 0' }} />
       <HSeparator mb='20px' />
     </Flex>
   );

@@ -38,14 +38,14 @@ export default function Footer() {
         {" "}
         &copy; {1900 + new Date().getYear()}
         <Text as='span' fontWeight='500' ms='4px'>
-          Horizon UI. All Rights Reserved. Made with love by
+          © 2025 Stockholms Basketbollförbund - Powered by
           <Link
             mx='3px'
             color={textColor}
-            href='https://www.simmmple.com?ref=horizon-chakra-free'
+            href='https://www.mirzamuhic.com'
             target='_blank'
             fontWeight='700'>
-            Simmmple!
+            Mirza Muhic
           </Link>
         </Text>
       </Text>
@@ -58,7 +58,7 @@ export default function Footer() {
           <Link
             fontWeight='500'
             color={textColor}
-            href='mailto:hello@simmmple.com'>
+            href='mailto:mirza.muhic@stockholmbasket.se'>
             Support
           </Link>
         </ListItem>
@@ -70,8 +70,8 @@ export default function Footer() {
           <Link
             fontWeight='500'
             color={textColor}
-            href='https://www.simmmple.com/licenses?ref=horizon-chakra-free'>
-            License
+            href='https://www.profixio.com/app/tournaments'>
+            Profixio
           </Link>
         </ListItem>
         <ListItem
@@ -82,16 +82,16 @@ export default function Footer() {
           <Link
             fontWeight='500'
             color={textColor}
-            href='https://simmmple.com/terms-of-service?ref=horizon-chakra-free'>
-            Terms of Use
+            href='https://stockholmbasket.se/distriktslag/'>
+            DLT
           </Link>
         </ListItem>
         <ListItem>
           <Link
             fontWeight='500'
             color={textColor}
-            href='https://www.blog.simmmple.com/?ref=horizon-chakra-free'>
-            Blog
+            href='https://mirzamuhic.com'>
+            Mirza Muhic Hemsida
           </Link>
         </ListItem>
       </List>
