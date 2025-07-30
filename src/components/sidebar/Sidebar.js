@@ -27,6 +27,7 @@ import { IoMenuOutline } from "react-icons/io5";
 
 function Sidebar(props) {
   const { routes } = props;
+  const filteredRoutes = routes.filter(route => !route.hidden); // Filtrera dolda
 
   let variantChange = "0.2s linear";
   let shadow = useColorModeValue(
@@ -54,7 +55,7 @@ function Sidebar(props) {
           renderTrackVertical={renderTrack}
           renderThumbVertical={renderThumb}
           renderView={renderView}>
-          <Content routes={routes} />
+          <Content routes={filteredRoutes} /> {/* Använd filtrerad */}
         </Scrollbars>
       </Box>
     </Box>
@@ -70,8 +71,7 @@ export function SidebarResponsive(props) {
   const btnRef = React.useRef();
 
   const { routes } = props;
-  // let isWindows = navigator.platform.startsWith("Win");
-  //  BRAND
+  const filteredRoutes = routes.filter(route => !route.hidden); // Filtrera dolda
 
   return (
     <Flex display={{ sm: "flex", xl: "none" }} alignItems='center'>
@@ -105,7 +105,7 @@ export function SidebarResponsive(props) {
               renderTrackVertical={renderTrack}
               renderThumbVertical={renderThumb}
               renderView={renderView}>
-              <Content routes={routes} />
+              <Content routes={filteredRoutes} /> {/* Använd filtrerad */}
             </Scrollbars>
           </DrawerBody>
         </DrawerContent>

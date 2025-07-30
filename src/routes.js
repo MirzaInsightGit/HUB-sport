@@ -55,6 +55,7 @@ const routes = [
     path: '/profile',
     icon: <Icon as={MdPerson} width="20px" height="20px" color="inherit" />,
     component: <Profile />,
+    hidden: true,
   },
   {
     name: 'Sign In',
@@ -62,6 +63,7 @@ const routes = [
     path: '/sign-in',
     icon: <Icon as={MdLock} width="20px" height="20px" color="inherit" />,
     component: <SignInCentered />,
+    hidden: true,
   },
   {
     name: 'Till Omer',
@@ -69,6 +71,7 @@ const routes = [
     path: '/rtl-default',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <RTL />,
+    hidden: true,
   },
 ];
 
