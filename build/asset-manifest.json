@@ -1,0 +1,21 @@
+{
+  "files": {
+    "main.css": "/static/css/main.855479f0.css",
+    "main.js": "/static/js/main.4a9e1983.js",
+    "static/media/Mirza-Omer.JPG": "/static/media/Mirza-Omer.e1534f09054fabcd470e.JPG",
+    "static/media/Stockholm-BDF-Gra-Liggande-2.png": "/static/media/Stockholm-BDF-Gra-Liggande-2.e653e84b8c60eda9fc03.png",
+    "static/media/banner.png": "/static/media/banner.80db2a895510dd2719aa.png",
+    "static/media/Navbar.png": "/static/media/Navbar.f96a9f58c491b9acda99.png",
+    "static/media/avatar4.png": "/static/media/avatar4.54d5c1de851c273b2cd9.png",
+    "static/media/Project3.png": "/static/media/Project3.378b532af038bf47559c.png",
+    "static/media/Project2.png": "/static/media/Project2.90f702366422b52138b1.png",
+    "static/media/Project1.png": "/static/media/Project1.d5952144f76e2cb9e5d6.png",
+    "index.html": "/index.html",
+    "main.855479f0.css.map": "/static/css/main.855479f0.css.map",
+    "main.4a9e1983.js.map": "/static/js/main.4a9e1983.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.855479f0.css",
+    "static/js/main.4a9e1983.js"
+  ]
+}

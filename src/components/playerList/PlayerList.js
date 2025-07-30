@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community'; // Singular: AllCommunityModule
+import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import axios from 'axios';
 import { Card, Heading, Flex, Button, Text, useColorModeValue } from "@chakra-ui/react";
 import { CosmosClient } from '@azure/cosmos';
 
-ModuleRegistry.registerModules([AllCommunityModule]); // Singular
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
@@ -20,11 +20,7 @@ const PlayerList = () => {
   const database = cosmosClient.database('HUBSportDB');
   const container = database.container('Players');
 
-  useEffect(() => {
-    fetchPlayers();
-  }, []);
-
-  const fetchPlayers = async () => {
+  const fetchPlayers = useCallback(async () => {
     const baseUrl = process.env.REACT_APP_WC_URL;
     if (!baseUrl) {
       console.error('REACT_APP_WC_URL is not defined in .env');
@@ -64,7 +60,11 @@ const PlayerList = () => {
     } catch (error) {
       console.error('Error fetching players:', error.response ? error.response.data : error.message);
     }
-  };
+  }, [container]);
+
+  useEffect(() => {
+    fetchPlayers();
+  }, [fetchPlayers]);
 
   const onCellValueChanged = async (params) => {
     const { data } = params;
