@@ -1,34 +1,33 @@
 // Chakra Imports
 import {
   Avatar,
-  Button,
   Flex,
   Icon,
-  Image,
-  Link,
   Menu,
   MenuButton,
   MenuItem,
   MenuList,
   Text,
   useColorModeValue,
-  useColorMode,
 } from '@chakra-ui/react';
 // Custom Components
 import { ItemContent } from 'components/menu/ItemContent';
 import { SearchBar } from 'components/navbar/searchBar/SearchBar';
 import { SidebarResponsive } from 'components/sidebar/Sidebar';
 import PropTypes from 'prop-types';
-import React from 'react';
+import React, { useState } from 'react';
 // Assets
-import navImage from 'assets/img/layout/Navbar.png';
-import { MdNotificationsNone, MdInfoOutline } from 'react-icons/md';
-import { IoMdMoon, IoMdSunny } from 'react-icons/io';
+import { MdNotificationsNone } from 'react-icons/md';
 import { FaEthereum } from 'react-icons/fa';
 import routes from 'routes';
+import { useMsal } from '@azure/msal-react'; // Ny import
+import { Link as RouterLink } from 'react-router-dom'; // Se till att importera
+
 export default function HeaderLinks(props) {
   const { secondary } = props;
-  const { colorMode, toggleColorMode } = useColorMode();
+  const { accounts, instance } = useMsal(); // Hämta från MSAL
+  const userName = accounts[0]?.name || 'Användare'; // Dynamisk från AAD (uppdatera till Graph om mer data behövs)
+
   // Chakra Color Mode
   const navbarIcon = useColorModeValue('gray.400', 'white');
   let menuBg = useColorModeValue('white', 'navy.800');
@@ -42,7 +41,22 @@ export default function HeaderLinks(props) {
     '14px 17px 40px 4px rgba(112, 144, 176, 0.18)',
     '14px 17px 40px 4px rgba(112, 144, 176, 0.06)',
   );
-  const borderButton = useColorModeValue('secondaryGray.500', 'whiteAlpha.200');
+
+  const [notifications, setNotifications] = useState([
+    { id: 1, info: 'HUB Lanserad 30 Juli 2025', read: false },
+    { id: 2, info: 'Omer är bäst!', read: false },
+  ]);
+
+  const markAllRead = () => {
+    setNotifications(notifications.map(n => ({ ...n, read: true })));
+  };
+
+  const handleLogout = async () => {
+    await instance.logoutRedirect({
+      postLogoutRedirectUri: 'https://hub.mirzamuhic.com/logout', // Azure logout URI
+    });
+  };
+
   return (
     <Flex
       w={{ sm: '100%', md: 'auto' }}
@@ -122,128 +136,42 @@ export default function HeaderLinks(props) {
           maxW={{ base: '360px', md: 'unset' }}
         >
           <Flex w="100%" mb="20px">
-            <Text fontSize="md" fontWeight="600" color={textColor}>
-              Notifications
-            </Text>
+            <Text fontSize="md" fontWeight="600" color={textColor}>Notiser</Text>
             <Text
               fontSize="sm"
               fontWeight="500"
               color={textColorBrand}
               ms="auto"
               cursor="pointer"
+              onClick={markAllRead}
             >
-              Mark all read
+              Markera alla som lästa
             </Text>
           </Flex>
           <Flex flexDirection="column">
-            <MenuItem
-              _hover={{ bg: 'none' }}
-              _focus={{ bg: 'none' }}
-              px="0"
-              borderRadius="8px"
-              mb="10px"
-            >
-              <ItemContent info="Horizon UI Dashboard PRO" />
-            </MenuItem>
-            <MenuItem
-              _hover={{ bg: 'none' }}
-              _focus={{ bg: 'none' }}
-              px="0"
-              borderRadius="8px"
-              mb="10px"
-            >
-              <ItemContent info="Horizon Design System Free" />
-            </MenuItem>
-          </Flex>
+  {notifications.map(n => (
+    <MenuItem
+      key={n.id}
+      _hover={{ bg: 'none' }}
+      _focus={{ bg: 'none' }}
+      px="0"
+      borderRadius="8px"
+      mb="10px"
+      color={n.read ? 'gray.500' : textColor}
+    >
+      <ItemContent info={n.info} style={n.read ? { textDecoration: 'line-through' } : {}} />
+    </MenuItem>
+  ))}
+</Flex>
         </MenuList>
       </Menu>
 
-      <Menu>
-        <MenuButton p="0px">
-          <Icon
-            mt="6px"
-            as={MdInfoOutline}
-            color={navbarIcon}
-            w="18px"
-            h="18px"
-            me="10px"
-          />
-        </MenuButton>
-        <MenuList
-          boxShadow={shadow}
-          p="20px"
-          me={{ base: '30px', md: 'unset' }}
-          borderRadius="20px"
-          bg={menuBg}
-          border="none"
-          mt="22px"
-          minW={{ base: 'unset' }}
-          maxW={{ base: '360px', md: 'unset' }}
-        >
-          <Image src={navImage} borderRadius="16px" mb="28px" />
-          <Flex flexDirection="column">
-            <Link w="100%" href="https://horizon-ui.com/pro">
-              <Button w="100%" h="44px" mb="10px" variant="brand">
-                Buy Horizon UI PRO
-              </Button>
-            </Link>
-            <Link
-              w="100%"
-              href="https://horizon-ui.com/documentation/docs/introduction"
-            >
-              <Button
-                w="100%"
-                h="44px"
-                mb="10px"
-                border="1px solid"
-                bg="transparent"
-                borderColor={borderButton}
-              >
-                See Documentation
-              </Button>
-            </Link>
-            <Link
-              w="100%"
-              href="https://github.com/horizon-ui/horizon-ui-chakra-ts"
-            >
-              <Button
-                w="100%"
-                h="44px"
-                variant="no-hover"
-                color={textColor}
-                bg="transparent"
-              >
-                Try Horizon Free
-              </Button>
-            </Link>
-          </Flex>
-        </MenuList>
-      </Menu>
-
-      <Button
-        variant="no-hover"
-        bg="transparent"
-        p="0px"
-        minW="unset"
-        minH="unset"
-        h="18px"
-        w="max-content"
-        onClick={toggleColorMode}
-      >
-        <Icon
-          me="10px"
-          h="18px"
-          w="18px"
-          color={navbarIcon}
-          as={colorMode === 'light' ? IoMdMoon : IoMdSunny}
-        />
-      </Button>
       <Menu>
         <MenuButton p="0px">
           <Avatar
             _hover={{ cursor: 'pointer' }}
             color="white"
-            name="Mirza Muhic"
+            name={userName} // Dynamisk avatar-name
             bg="#11047A"
             size="sm"
             w="40px"
@@ -270,7 +198,7 @@ export default function HeaderLinks(props) {
               fontWeight="700"
               color={textColor}
             >
-              👋&nbsp; Hey, Mirza
+              👋&nbsp; Hej, {userName}
             </Text>
           </Flex>
           <Flex flexDirection="column" p="10px">
@@ -279,16 +207,10 @@ export default function HeaderLinks(props) {
               _focus={{ bg: 'none' }}
               borderRadius="8px"
               px="14px"
+              as={RouterLink}
+              to="/admin/profile"
             >
-              <Text fontSize="sm">Profile Settings</Text>
-            </MenuItem>
-            <MenuItem
-              _hover={{ bg: 'none' }}
-              _focus={{ bg: 'none' }}
-              borderRadius="8px"
-              px="14px"
-            >
-              <Text fontSize="sm">Newsletter Settings</Text>
+              <Text fontSize="sm">Min Profil</Text>
             </MenuItem>
             <MenuItem
               _hover={{ bg: 'none' }}
@@ -296,8 +218,9 @@ export default function HeaderLinks(props) {
               color="red.400"
               borderRadius="8px"
               px="14px"
+              onClick={handleLogout}
             >
-              <Text fontSize="sm">Log out</Text>
+              <Text fontSize="sm">Logga ut</Text>
             </MenuItem>
           </Flex>
         </MenuList>
