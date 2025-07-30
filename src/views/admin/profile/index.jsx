@@ -7,7 +7,6 @@ import {
   Button,
   FormControl,
   FormLabel,
-  Avatar,
   Flex,
   useColorModeValue,
   VStack,
@@ -22,7 +21,7 @@ import { useMsal } from "@azure/msal-react";
 import { InteractionRequiredAuthError } from "@azure/msal-browser";
 import { Client } from "@microsoft/microsoft-graph-client";
 import "isomorphic-fetch";
-import { loginRequest } from "authConfig"; // Uppdatera scopes: ['User.Read', 'User.ReadWrite.All']
+import { loginRequest } from "authConfig";
 
 import banner from 'assets/img/auth/banner.png';
 import avatar from 'assets/img/avatars/avatar4.png';
