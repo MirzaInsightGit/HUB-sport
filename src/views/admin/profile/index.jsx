@@ -26,6 +26,16 @@ import { loginRequest } from "authConfig";
 import banner from 'assets/img/auth/banner.png';
 import avatar from 'assets/img/avatars/avatar4.png';
 
+class CustomAuthProvider {
+  constructor(accessToken) {
+    this.accessToken = accessToken;
+  }
+
+  getAccessToken() {
+    return Promise.resolve(this.accessToken);
+  }
+}
+
 export default function UserReports() {
   const { instance, accounts } = useMsal();
   const textColor = useColorModeValue("navy.700", "white");
@@ -69,7 +79,7 @@ export default function UserReports() {
         setError(null);
         const tokenResponse = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
         const graphClient = Client.init({
-          authProvider: { getAccessToken: () => tokenResponse.accessToken },
+          authProvider: new CustomAuthProvider(tokenResponse.accessToken),
         });
         const user = await graphClient.api("/me").get();
         setProfileData({
@@ -123,7 +133,7 @@ export default function UserReports() {
     try {
       const tokenResponse = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
       const graphClient = Client.init({
-        authProvider: { getAccessToken: () => tokenResponse.accessToken },
+        authProvider: new CustomAuthProvider(tokenResponse.accessToken),
       });
       await graphClient.api("/me").patch({
         displayName: profileData.displayName,

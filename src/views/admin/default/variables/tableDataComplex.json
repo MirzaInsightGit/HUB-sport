@@ -1,26 +1,26 @@
 [
   {
-    "name":"Horizon UI PRO",
+    "name":"Farsta 3+4 kl. 09-19 09-19",
     "status": "Approved",
-    "date": "18 Apr 2022",
-    "progress": 75.5  
+    "date": "25-26/10  2025",
+    "progress": 10  
   },
   {
-    "name":"Horizon UI Free",
-    "status": "Disable",
-    "date": "18 Apr 2022",
-    "progress": 25.5  
-  },
-  {
-    "name":"Marketplace",
-    "status": "Error",
-    "date": "20 May 2021",
-    "progress": 90  
-  },
-  {
-    "name":"Weekly Updates",
+    "name":"Tellusborg hall 1+2+3 kl. 09-19",
     "status": "Approved",
-    "date": "12 Jul 2021",
-    "progress": 50.5  
+    "date": "27-28/12 2025",
+    "progress": 10  
+  },
+  {
+    "name":"Åkeshov 1+2 kl. 09-19",
+    "status": "Approved",
+    "date": "11-12/4 2026",
+    "progress": 10  
+  },
+  {
+    "name":"DLT TURNERING",
+    "status": "Approved",
+    "date": "Juni?",
+    "progress": 0
   }
 ]

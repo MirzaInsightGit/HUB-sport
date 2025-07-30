@@ -168,7 +168,7 @@ export default function ComplexTable(props) {
           fontWeight="700"
           lineHeight="100%"
         >
-          Complex Table
+          Läger datum
         </Text>
         <Menu />
       </Flex>
