@@ -128,18 +128,10 @@ const LatestRegistrations = () => {
         },
       };
 
-      // Hämta produkter från specifik kategori (t.ex. uncategorized ID 15, ändra vid behov)
-      const categoryId = 15; // Byt till din specifika kategori-ID
-      const productsResponse = await axios.get(`${wcUrl}/wp-json/wc/v3/products?category=${categoryId}&per_page=100`, auth);
-      const productIds = productsResponse.data.map(p => p.id);
-
-      // Hämta senaste ordrar
-      const ordersResponse = await axios.get(`${wcUrl}/wp-json/wc/v3/orders?per_page=50&orderby=date&order=desc`, auth);
-      const filteredOrders = ordersResponse.data.filter(order => 
-        order.line_items.some(item => productIds.includes(item.product_id))
-      ).slice(0, 10); // Begränsa till max 10 rader
-
-      setOrders(filteredOrders);
+      // Hämtar de 10 senaste ordrarna från WooCommerce, sorterade efter datum (nyast först).
+      // Ingen kategori-filter, så alla ordrar visas.
+      const ordersResponse = await axios.get(`${wcUrl}/wp-json/wc/v3/orders?per_page=10&orderby=date&order=desc`, auth);
+      setOrders(ordersResponse.data);
     };
     fetchOrders();
   }, []);
