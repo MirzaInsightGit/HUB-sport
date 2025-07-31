@@ -6,7 +6,12 @@ import RTLLogin from './layouts/rtl';
 import { ChakraProvider } from '@chakra-ui/react';
 import initialTheme from './theme/theme';
 import { useState } from 'react';
-import { MsalProvider } from '@azure/msal-react';
+import { MsalProvider, useIsAuthenticated } from '@azure/msal-react';
+
+const PrivateRoute = ({ children }) => {
+  const isAuthenticated = useIsAuthenticated();
+  return isAuthenticated ? children : <Navigate to="/auth/sign-in" replace />;
+};
 
 export default function App({ msalInstance }) {
   const [currentTheme, setCurrentTheme] = useState(initialTheme);
@@ -19,16 +24,20 @@ export default function App({ msalInstance }) {
           <Route
             path="admin/*"
             element={
-              <AdminLayout theme={currentTheme} setTheme={setCurrentTheme} />
+              <PrivateRoute>
+                <AdminLayout theme={currentTheme} setTheme={setCurrentTheme} />
+              </PrivateRoute>
             }
           />
           <Route
             path="rtl/*"
             element={
-              <RTLLogin theme={currentTheme} setTheme={setCurrentTheme} />
+              <PrivateRoute>
+                <RTLLogin theme={currentTheme} setTheme={setCurrentTheme} />
+              </PrivateRoute>
             }
           />
-          <Route path="/" element={<Navigate to="/admin" replace />} />
+          <Route path="/" element={<Navigate to="/admin/default" replace />} />
         </Routes>
       </ChakraProvider>
     </MsalProvider>
