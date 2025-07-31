@@ -9,46 +9,6 @@ import { useMsal } from "@azure/msal-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-class StarRatingEditor extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { value: parseInt(props.value) || 0 };
-  }
-
-  getValue() {
-    console.log('Get value called, returning:', this.state.value);
-    return String(this.state.value);
-  }
-
-  isPopup() {
-    return true;
-  }
-
-  onStarClick = (newValue) => {
-    console.log('Star clicked, new value:', newValue);
-    this.setState({ value: newValue }, () => this.props.stopEditing());
-  }
-
-  render() {
-    const { value } = this.state;
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px', backgroundColor: 'white', border: '1px solid gray', borderRadius: '5px' }}>
-        <div style={{ display: 'flex' }}>
-          {[1, 2, 3, 4, 5].map((star) => (
-            <span
-              key={star}
-              style={{ cursor: 'pointer', fontSize: '40px', color: star <= value ? 'gold' : 'lightgray', margin: '0 5px' }}
-              onClick={() => this.onStarClick(star)}
-            >
-              ★
-            </span>
-          ))}
-        </div>
-      </div>
-    );
-  }
-}
-
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
   const textColor = useColorModeValue("navy.700", "white");
