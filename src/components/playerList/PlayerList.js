@@ -9,6 +9,46 @@ import { useMsal } from "@azure/msal-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+class StarRatingEditor extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { value: parseInt(props.value) || 0 };
+  }
+
+  getValue() {
+    console.log('Get value called, returning:', this.state.value);
+    return String(this.state.value);
+  }
+
+  isPopup() {
+    return true;
+  }
+
+  onStarClick = (newValue) => {
+    console.log('Star clicked, new value:', newValue);
+    this.setState({ value: newValue }, () => this.props.stopEditing());
+  }
+
+  render() {
+    const { value } = this.state;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px', backgroundColor: 'white', border: '1px solid gray', borderRadius: '5px' }}>
+        <div style={{ display: 'flex' }}>
+          {[1, 2, 3, 4, 5].map((star) => (
+            <span
+              key={star}
+              style={{ cursor: 'pointer', fontSize: '40px', color: star <= value ? 'gold' : 'lightgray', margin: '0 5px' }}
+              onClick={() => this.onStarClick(star)}
+            >
+              ★
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+}
+
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
   const textColor = useColorModeValue("navy.700", "white");
@@ -51,11 +91,11 @@ const PlayerList = () => {
           email: order.billing.email,
           phone: order.billing.phone || '',
           address: `${order.billing.address_1}, ${order.billing.city}` || '',
-          rating: { value: '', by: '', timestamp: '' },
+          rating: [],
           comments: { value: '', by: '', timestamp: '' },
           spelarnamn: getMeta('dlt_spelarnamn'),
           kon: getMeta('dlt_kon'),
-          mobilenummer: getMeta('dlt_mobilenummer'),
+          mobilnummer: getMeta('dlt_mobilnummer'),
           spelarmejl: getMeta('dlt_spelarmejl'),
           klubblag: getMeta('dlt_klubblag'),
           basket_position: getMeta('dlt_basket_position'),
@@ -72,9 +112,11 @@ const PlayerList = () => {
           const { resources } = await container.items.query(querySpec).fetchAll();
           if (resources.length > 0) {
             const resource = resources[0];
-            let rating = resource.rating || { value: '', by: '', timestamp: '' };
+            let rating = resource.rating || [];
             if (typeof rating === 'string') {
-              rating = { value: rating, by: '', timestamp: '' };
+              rating = [{ value: rating, by: 'Unknown', timestamp: '' }];
+            } else if (typeof rating === 'object' && !Array.isArray(rating) && rating.value) {
+              rating = [rating];
             }
             player.rating = rating;
             let comments = resource.comments || { value: '', by: '', timestamp: '' };
@@ -86,7 +128,7 @@ const PlayerList = () => {
           } else {
             const item = {
               id: player.id,
-              rating: { value: '', by: '', timestamp: '' },
+              rating: [],
               comments: { value: '', by: '', timestamp: '' }
             };
             await container.items.upsert(item, { partitionKey: player.id });
@@ -110,8 +152,7 @@ const PlayerList = () => {
     console.log('Cell value changed for field', params.colDef.headerName, 'old:', params.oldValue, 'new:', params.newValue);
     const { data } = params;
     if (params.colDef.headerName === 'Betyg') {
-      data.rating.by = currentUser;
-      data.rating.timestamp = new Date().toISOString();
+      data.rating.push({ value: params.newValue, by: currentUser, timestamp: new Date().toISOString() });
     } else if (params.colDef.headerName === 'Kommentarer') {
       data.comments.by = currentUser;
       data.comments.timestamp = new Date().toISOString();
@@ -139,9 +180,11 @@ const PlayerList = () => {
   };
 
   const ratingRenderer = (params) => {
-    const rating = parseInt(params.value) || 0;
-    const by = params.data.rating.by ? ` by ${params.data.rating.by}` : '';
-    const ts = params.data.rating.timestamp ? ` at ${new Date(params.data.rating.timestamp).toLocaleString()}` : '';
+    if (!params.data.rating || params.data.rating.length === 0) return '☆☆☆☆☆';
+    const last = params.data.rating[params.data.rating.length - 1];
+    const rating = parseInt(last.value) || 0;
+    const by = last.by ? ` by ${last.by}` : '';
+    const ts = last.timestamp ? ` at ${new Date(last.timestamp).toLocaleString()}` : '';
     return '★'.repeat(rating) + '☆'.repeat(5 - rating) + by + ts;
   };
 
@@ -167,9 +210,9 @@ const PlayerList = () => {
       cellEditorParams: {
         values: ['', '1', '2', '3', '4', '5']
       },
-      valueGetter: (params) => params.data.rating.value,
+      valueGetter: (params) => params.data.rating.length > 0 ? params.data.rating[params.data.rating.length - 1].value : '',
       valueSetter: (params) => {
-        params.data.rating.value = params.newValue;
+        params.data.rating.push({ value: params.newValue, by: currentUser, timestamp: new Date().toISOString() });
         return true;
       }
     },
@@ -185,7 +228,7 @@ const PlayerList = () => {
         return true;
       }
     },
-    { headerName: 'Mobilenummer', field: 'mobilenummer', sortable: true, filter: true },
+    { headerName: 'Mobilnummer', field: 'mobilnummer', sortable: true, filter: true },
     { headerName: 'Spelarmejl', field: 'spelarmejl', sortable: true, filter: true },
     { headerName: 'Föräldrar namn', field: 'name', sortable: true, filter: true },
     { headerName: 'Föräldrar Email', field: 'email', sortable: true, filter: true },
