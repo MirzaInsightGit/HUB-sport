@@ -154,7 +154,7 @@ export default function ComplexTable(props) {
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    debugTable: false,
+    debugTable: true,
   });
   return (
     <Card
