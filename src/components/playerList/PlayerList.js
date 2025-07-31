@@ -1,53 +1,28 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import axios from 'axios';
 import { Card, Heading, Flex, Button, Text, useColorModeValue } from "@chakra-ui/react";
 import { CosmosClient } from '@azure/cosmos';
+import { useMsal } from "@azure/msal-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
-
-const StarRatingEditor = (props) => {
-  const [value, setValue] = useState(parseInt(props.value) || 0);
-
-  const onStarClick = (newValue) => {
-    setValue(newValue);
-  };
-
-  const onConfirm = () => {
-    props.api.stopEditing();
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px' }}>
-      <div style={{ display: 'flex' }}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <span
-            key={star}
-            style={{ cursor: 'pointer', fontSize: '30px', color: star <= value ? 'gold' : 'gray' }}
-            onClick={() => onStarClick(star)}
-          >
-            ★
-          </span>
-        ))}
-      </div>
-      <button onClick={onConfirm} style={{ marginTop: '10px' }}>Bekräfta</button>
-    </div>
-  );
-};
 
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
   const textColor = useColorModeValue("navy.700", "white");
+  const { accounts } = useMsal();
+  const currentUser = accounts[0] ? accounts[0].name : 'Unknown';
 
-  const cosmosClient = new CosmosClient({
-    endpoint: process.env.REACT_APP_COSMOS_ENDPOINT,
-    key: process.env.REACT_APP_COSMOS_KEY
-  });
-  const database = cosmosClient.database('HUBSportDB');
-  const container = database.container('Players');
+  const container = useMemo(() => {
+    const cosmosClient = new CosmosClient({
+      endpoint: process.env.REACT_APP_COSMOS_ENDPOINT,
+      key: process.env.REACT_APP_COSMOS_KEY
+    });
+    const database = cosmosClient.database('HUBSportDB');
+    return database.container('Players');
+  }, []);
 
   const fetchPlayers = useCallback(async () => {
     const baseUrl = process.env.REACT_APP_WC_URL;
@@ -76,8 +51,8 @@ const PlayerList = () => {
           email: order.billing.email,
           phone: order.billing.phone || '',
           address: `${order.billing.address_1}, ${order.billing.city}` || '',
-          rating: '',
-          comments: '',
+          rating: { value: '', by: '', timestamp: '' },
+          comments: { value: '', by: '', timestamp: '' },
           spelarnamn: getMeta('dlt_spelarnamn'),
           kon: getMeta('dlt_kon'),
           mobilenummer: getMeta('dlt_mobilenummer'),
@@ -90,14 +65,35 @@ const PlayerList = () => {
       });
       for (let player of players) {
         try {
-          const { resource } = await container.item(player.id, player.id).read();
-          if (resource) {
-            player.rating = resource.rating || '';
-            player.comments = resource.comments || '';
+          const querySpec = {
+            query: "SELECT * FROM c WHERE c.id = @id",
+            parameters: [{ name: "@id", value: player.id }]
+          };
+          const { resources } = await container.items.query(querySpec).fetchAll();
+          if (resources.length > 0) {
+            const resource = resources[0];
+            let rating = resource.rating || { value: '', by: '', timestamp: '' };
+            if (typeof rating === 'string') {
+              rating = { value: rating, by: '', timestamp: '' };
+            }
+            player.rating = rating;
+            let comments = resource.comments || { value: '', by: '', timestamp: '' };
+            if (typeof comments === 'string') {
+              comments = { value: comments, by: '', timestamp: '' };
+            }
+            player.comments = comments;
             console.log('Loaded data for player', player.id, resource);
+          } else {
+            const item = {
+              id: player.id,
+              rating: { value: '', by: '', timestamp: '' },
+              comments: { value: '', by: '', timestamp: '' }
+            };
+            await container.items.upsert(item, { partitionKey: player.id });
+            console.log('Created new entry for player', player.id);
           }
         } catch (err) {
-          console.error('Error loading for player', player.id, err);
+          console.error('Error loading/creating for player', player.id, err);
         }
       }
       setRowData(players);
@@ -111,15 +107,24 @@ const PlayerList = () => {
   }, [fetchPlayers]);
 
   const onCellValueChanged = async (params) => {
+    console.log('Cell value changed for field', params.colDef.headerName, 'old:', params.oldValue, 'new:', params.newValue);
     const { data } = params;
+    if (params.colDef.headerName === 'Betyg') {
+      data.rating.by = currentUser;
+      data.rating.timestamp = new Date().toISOString();
+    } else if (params.colDef.headerName === 'Kommentarer') {
+      data.comments.by = currentUser;
+      data.comments.timestamp = new Date().toISOString();
+    }
     try {
       const item = {
         id: data.id,
-        rating: data.rating || '',
-        comments: data.comments || ''
+        rating: data.rating,
+        comments: data.comments
       };
       await container.items.upsert(item, { partitionKey: data.id });
       console.log('Successfully saved to Cosmos:', data);
+      params.api.refreshCells({ rowNodes: [params.node], force: true });
     } catch (err) {
       console.error('Error saving to Cosmos:', err);
     }
@@ -133,6 +138,20 @@ const PlayerList = () => {
     }
   };
 
+  const ratingRenderer = (params) => {
+    const rating = parseInt(params.value) || 0;
+    const by = params.data.rating.by ? ` by ${params.data.rating.by}` : '';
+    const ts = params.data.rating.timestamp ? ` at ${new Date(params.data.rating.timestamp).toLocaleString()}` : '';
+    return '★'.repeat(rating) + '☆'.repeat(5 - rating) + by + ts;
+  };
+
+  const commentsRenderer = (params) => {
+    const value = params.value || '';
+    const by = params.data.comments.by ? ` by ${params.data.comments.by}` : '';
+    const ts = params.data.comments.timestamp ? ` at ${new Date(params.data.comments.timestamp).toLocaleString()}` : '';
+    return value + by + ts;
+  };
+
   const columnDefs = [
     { headerName: 'Spelarnamn', field: 'spelarnamn', sortable: true, filter: true },
     { headerName: 'Kön', field: 'kon', sortable: true, filter: true },
@@ -142,16 +161,30 @@ const PlayerList = () => {
     { headerName: 'Aktuell Serie', field: 'aktuellserie', sortable: true, filter: true },
     { 
       headerName: 'Betyg', 
-      field: 'rating', 
       editable: true,
-      cellRenderer: (params) => {
-        const rating = parseInt(params.value) || 0;
-        return '★'.repeat(rating) + '☆'.repeat(5 - rating);
+      cellRenderer: ratingRenderer,
+      cellEditor: 'agSelectCellEditor',
+      cellEditorParams: {
+        values: ['', '1', '2', '3', '4', '5']
       },
-      cellEditor: StarRatingEditor,
-      cellEditorPopup: true
+      valueGetter: (params) => params.data.rating.value,
+      valueSetter: (params) => {
+        params.data.rating.value = params.newValue;
+        return true;
+      }
     },
-    { headerName: 'Kommentarer', field: 'comments', editable: true, cellEditor: 'agLargeTextCellEditor', width: 400 },
+    { 
+      headerName: 'Kommentarer', 
+      editable: true, 
+      cellEditor: 'agLargeTextCellEditor', 
+      cellRenderer: commentsRenderer,
+      width: 400,
+      valueGetter: (params) => params.data.comments.value,
+      valueSetter: (params) => {
+        params.data.comments.value = params.newValue;
+        return true;
+      }
+    },
     { headerName: 'Mobilenummer', field: 'mobilenummer', sortable: true, filter: true },
     { headerName: 'Spelarmejl', field: 'spelarmejl', sortable: true, filter: true },
     { headerName: 'Föräldrar namn', field: 'name', sortable: true, filter: true },
@@ -172,7 +205,7 @@ const PlayerList = () => {
           rowData={rowData}
           columnDefs={columnDefs}
           pagination={true}
-          paginationPageSize={100}
+          paginationPageSize={50}
           onCellValueChanged={onCellValueChanged}
           getRowStyle={getRowStyle}
         />
