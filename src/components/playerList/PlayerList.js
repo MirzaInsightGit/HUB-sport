@@ -95,7 +95,7 @@ const PlayerList = () => {
           comments: { value: '', by: '', timestamp: '' },
           spelarnamn: getMeta('dlt_spelarnamn'),
           kon: getMeta('dlt_kon'),
-          mobilnummer: getMeta('dlt_mobilnummer'),
+          mobilenummer: getMeta('dlt_mobilenummer'),
           spelarmejl: getMeta('dlt_spelarmejl'),
           klubblag: getMeta('dlt_klubblag'),
           basket_position: getMeta('dlt_basket_position'),
@@ -228,7 +228,7 @@ const PlayerList = () => {
         return true;
       }
     },
-    { headerName: 'Mobilnummer', field: 'mobilnummer', sortable: true, filter: true },
+    { headerName: 'Mobilenummer', field: 'mobilenummer', sortable: true, filter: true },
     { headerName: 'Spelarmejl', field: 'spelarmejl', sortable: true, filter: true },
     { headerName: 'Föräldrar namn', field: 'name', sortable: true, filter: true },
     { headerName: 'Föräldrar Email', field: 'email', sortable: true, filter: true },
