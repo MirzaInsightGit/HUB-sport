@@ -1,119 +1,108 @@
-<<<<<<< HEAD
-# [Horizon UI ⚡️](https://horizon-ui.com/horizon-ui-chakra) [![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social&logo=twitter)](https://twitter.com/intent/tweet?url=https://horizon-ui.com/&text=Check%20Horizon%20UI,%20the%20trendiest%20open-source%20admin%20template%20for%20Chakra%20UI%20&%20React!)
+# HUB Sport Portal ⚡️  
+[hub.mirzamuhic.com](https://hub.mirzamuhic.com)  
+Fullstack React + Azure-baserad sportplattform för distrikts- och lagadministration.
 
-![version](https://img.shields.io/badge/version-3.0.0-brightgreen.svg)
-![license](https://img.shields.io/badge/license-MIT-blue.svg)
-[![GitHub issues open](https://img.shields.io/github/issues/horizon-ui/horizon-ui-chakra.svg?maxAge=2592000)](https://github.com/horizon-ui/horizon-ui-chakra/issues?q=is%3Aopen+is%3Aissue)
+## 🔧 Projektbeskrivning
 
-<p>&nbsp;</p>
+Detta projekt syftar till att skapa en komplett sportportal för Stockholm Basket och övriga användargrupper, med följande funktionalitet:
 
-[<img alt="Horizon UI" src="https://i.ibb.co/fdyTwz1/introduction-image-2.png" /> ](https://github.com/horizon-ui/horizon-ui-chakra)
+- Inloggning med Microsoft Entra (Azure AD B2C)
+- Rollbaserad åtkomst (Admin, Coach, User)
+- Integration mot Express API (Azure)
+- Headless WooCommerce-integration (API)
+- Redigering och hantering av spelardata (inkl. betyg, kommentarer, uppladdning av bilder per lägermoment)
+- Synkronisering mot CosmosDB / Microsoft-ekosystemet
+- Automatisk import av ordrar / anmälningar från WordPress
+- Designad med Chakra UI och React, inspirerad av templates från [mantisdashboard.io](https://mantisdashboard.io) för enkel och mobilvänlig dashboard
+- Komplett support för coach-vy, adminpanel, spelare och läger (inkl. DLT: Distriktslag Uttagningar med 5 läger, hantering av WooCommerce-anmälningar, betalningar till Fortnox)
+- Fullt hostad i Azure Static Web App + Azure Express API
+- Integration med Profixio för matchhantering, domaradministration och bokning
+- Möjlighet till subdomäner för distrikt, t.ex. projektx.stockholmbasket.se
+- Centraliserad plattform för kommunikation, ersätter WhatsApp/Messenger, med fokus på domare och administration
 
-<p>&nbsp;</p>
+## 🌐 Domän & Deployment
 
-Get started and build your dream web app with Horizon UI, the most trendiest &
-innovative Open Source Admin Template for Chakra UI & React!
+- **Frontend**: [https://hub.mirzamuhic.com](https://hub.mirzamuhic.com)
+- **API**: [https://stockholmbasket-express-api-avf6ayfkdnc3b6gn.centralus-01.azurewebsites.net/](https://stockholmbasket-express-api-avf6ayfkdnc3b6gn.centralus-01.azurewebsites.net/)
+- **GitHub Repo**: [https://github.com/MirzaInsightGit/HUB-sport](https://github.com/MirzaInsightGit/HUB-sport)
 
----
+## 📦 Tech Stack
 
-### Introduction
+- **Frontend**: React + Chakra UI + React Router
+- **Backend**: Node.js (Express) + CosmosDB
+- **Auth**: Microsoft Entra ID (via MSAL)
+- **Hosting**: Azure Static Web App + Azure Functions
+- **CI/CD**: GitHub Actions + Azure Pipelines (kommande)
 
-Designed for those who like modern UI elements and beautiful websites. Made of
-hundred of elements, designed blocks and fully coded pages, Horizon UI is ready
-to help you create stunning websites and webapps.
+## 🔐 Roller och säkerhet
 
-Save hundreds of hours trying to create and develop a dashboard from scratch.
-The fastest, most responsive & trendiest dashboard is here. Seriously.
+Systemet använder Entra ID för rollstyrning, där `RequireAdminRoute`, `RequireCoachRoute` och `RequireUserRoute` säkerställer att endast behöriga användare ser rätt innehåll. Roller läses in från `idToken.claims`.
 
-With Horizon UI you will find many examples for pages like NFTs Pages,
-Authentication Pages, Profile and so on. Just choose between a Basic Design or a
-cover and you are good to go!
 
-### 🎉 [NEW] Horizon UI Components
+## 🚀 Installation
 
-All the main components from both versions, this will help you to see and interact with all & the latest added components of Horizon (also, new components are on the way, stay tuned)! ⚡️
-<a href="https://horizon-ui.com/components/?ref=readme-horizon" target="_blank">See all components</a>
-
-### Documentation
-
-Each element is well presented in a very complex documentation. You can read
-more about the <a href="https://horizon-ui.com/documentation/docs/introduction?ref=readme-horizon" target="_blank">documentation
-here.</a>
-
-### Quick Start
-
-Install Horizon UI by running either of the following:
-
-- Install NodeJS LTS from
-  [NodeJs Official Page](https://nodejs.org/en/?ref=horizon-documentation)
-  (NOTE: Product only works with LTS version)
-
-Clone the repository with the following command:
+### 1. Klona projektet
 
 ```bash
-git clone https://github.com/horizon-ui/horizon-ui-chakra.git
+git clone https://github.com/MirzaInsightGit/HUB-sport.git
+cd HUB-sport
 ```
 
-Run in terminal this command:
+### 2. Installera beroenden
 
 ```bash
 npm install
 ```
 
-Then run this command to start your local server
+### 3. Miljövariabler (.env)
+
+Skapa en .env-fil i root med följande:
+
+```
+REACT_APP_WC_URL=https://stockholmbasket.se
+REACT_APP_WC_KEY=...
+REACT_APP_WC_SECRET=...
+REACT_APP_COSMOS_ENDPOINT=...
+REACT_APP_COSMOS_KEY=...
+```
+
+Dessa laddas automatiskt i Azure Static Web App via inställningar i portalen.
+
+### 4. Starta lokalt
 
 ```bash
 npm start
 ```
 
-### Example Pages
+## 📁 Strukturen
 
-If you want to get inspiration or just show something directly to your clients,
-you can jump start your development with our pre-built example pages. You will
-be able to quickly set up the basic structure for your web project. View
-<a href="https://horizon-ui.com/horizon-ui-chakra/?ref=readme-horizon" target="_blank">example
-pages here.</a>
+- `/components` -> Auth, Sidebar, Footer
+- `/hooks` -> useAuth, useRoles
+- `/views/admin` -> Pages (Dashboard, Players, Teams, etc.)
+- `/services` -> API-integrationer
 
-### Versions
+## 🧪 Tester & felsökning
 
-| Free Version                                                                                                       | PRO Version                                                                                                               |
-| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| [![Horizon UI](https://i.ibb.co/fdyTwz1/introduction-image-2.png)](https://www.horizon-ui.com/?ref=readme-horizon) | [![Horizon UI PRO](https://i.ibb.co/R6jFKRM/introduction-image-1.png)](https://www.horizon-ui.com/pro?ref=readme-horizon) |
+- Använd konsolloggar i RequireAdminRoute för att debugga claims och roller
+- API-felet 403 från Express beror ofta på saknad eller felaktig token
+- Validera att access_token skickas i header mot Azure API
 
-### Figma Version
+## 📣 Roadmap
 
-Horizon UI is available in Figma format as well! Check it out on Figma
-Community! 🎨
-[See the Horizon UI Figma design files](https://bit.ly/horizon-figma)
+- Inloggning via MSAL
+- Rollstyrning
+- Integration WooCommerce
+- CosmosDB backend
+- Coach-kommentar & betygsfunktion
+- Automatiserad dataanalys i Power BI
+- Multitenant-support
+- Fler API-integreringar (ex. IdrottOnline, Make, Baserow, Fabric, Clever)
 
-### Reporting Issues
+## 💬 Support & Feedback
 
-We use GitHub Issues as the official bug tracker for the Horizon UI. Here are
-some advices for our users that want to report an issue:
+Har du problem eller feedback? Kontakta mirza.muhic@stockholmbasket.se
 
-1. Make sure that you are using the latest version of the Horizon UI Dashbaord.
-   Check the CHANGELOG from your dashboard on our
-   [CHANGE LOG File](https://github.com/horizon-ui/horizon-ui-chakra/blob/main/CHANGELOG.md?ref=readme-horizon).
-2. Providing us reproducible steps for the issue will shorten the time it takes
-   for it to be fixed.
-3. Some issues may be browser specific, so specifying in what browser you
-   encountered the issue might help.
+⸻
 
----
-
-### Community
-
-Connect with the community! Feel free to ask questions, report issues, and meet
-new people that already use Horizon UI!
-
-💬 [Join the #HorizonUI Discord Community!](https://discord.gg/f6tEKFBd4m)
-
-### Copyright and license
-
-⭐️ [Copyright 2023 Simmmple ](https://www.simmmple.com/?ref=readme-horizon)
-
-📄 [Horizon UI License](https://www.simmmple.com/licenses?ref=readme-horizon)
-=======
-# HUB-sport
-Hub for sports
->>>>>>> c1afb8bc78b9daafabd67f3fb76bdbcc62fbc6ae
+© 2025 Mirza Muhic / Insight Strategies AB. All rights reserved.  
+MIT License.
