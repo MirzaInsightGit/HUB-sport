@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import routes from 'routes.js';
+import { useIsAuthenticated } from '@azure/msal-react';
 
 // Chakra imports
 import { Box, useColorModeValue } from '@chakra-ui/react';
@@ -10,6 +11,17 @@ import { SidebarContext } from 'contexts/SidebarContext';
 
 // Custom Chakra theme
 export default function Auth() {
+  const isAuthenticated = useIsAuthenticated();
+  const navigate = useNavigate();
+  const [redirected, setRedirected] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated && !redirected) {
+      setRedirected(true);
+      navigate('/admin/default', { replace: true });
+    }
+  }, [isAuthenticated, redirected, navigate]);
+
   // states and functions
   const [toggleSidebar, setToggleSidebar] = useState(false);
   // functions for changing the states from components
@@ -58,7 +70,7 @@ export default function Auth() {
                 {getRoutes(routes)}
                 <Route
                   path="/"
-                  element={<Navigate to="/auth/sign-in/default" replace />}
+                  element={<Navigate to="/auth/sign-in" replace />}
                 />
               </Routes>
             </Box>
