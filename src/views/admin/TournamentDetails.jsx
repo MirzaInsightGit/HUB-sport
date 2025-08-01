@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useParams } from 'react-router-dom';
 import { useProfixioTournamentMatches, useProfixioTournamentTeams } from '../../hooks/useProfixio';
 import { Box, Heading, Table, Thead, Tbody, Tr, Th, Td } from '@chakra-ui/react';

@@ -83,7 +83,7 @@ export const useProfixioTournamentMatches = (tournamentId) => {
     const fetchData = async () => {
       try {
         const matches = await getTournamentMatches(tournamentId, user.idToken);
-        setData(matches || []);
+        setData(Array.isArray(matches) ? matches : []);
       } catch (error) {
         console.error(error);
       } finally {
@@ -105,7 +105,7 @@ export const useProfixioTournamentTeams = (tournamentId, params = {}) => {
     const fetchData = async () => {
       try {
         const teams = await getTournamentTeams(tournamentId, params, user.idToken);
-        setData(teams.data || []);
+        setData(Array.isArray(teams) ? teams : []);
       } catch (error) {
         console.error(error);
       } finally {

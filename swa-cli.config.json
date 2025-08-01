@@ -1,0 +1,8 @@
+{
+  "configurations": {
+    "hub-sport": {
+      "appLocation": ".",
+      "outputLocation": "build",
+      "appBuildCommand": "npm run build -- --no-undef"
+    }
+  }
