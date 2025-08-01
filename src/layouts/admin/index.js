@@ -8,6 +8,8 @@ import { SidebarContext } from 'contexts/SidebarContext';
 import React, { useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import routes from 'routes.js';
+import Tournaments from '../../views/admin/Tournaments';
+import TournamentDetails from '../../views/admin/TournamentDetails';
 
 // Custom Chakra theme
 export default function Dashboard(props) {
@@ -153,6 +155,8 @@ export default function Dashboard(props) {
               >
                 <Routes>
                   {getRoutes(routes)}
+                  <Route path="tournaments" element={<Tournaments />} />
+                  <Route path="tournaments/:tournamentId" element={<TournamentDetails />} />
                   <Route
                     path="/"
                     element={<Navigate to="/admin/default" replace />}
