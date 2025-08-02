@@ -1,3 +1,4 @@
+// src/hooks/useProfixio.js
 import { useState, useEffect } from 'react';
 import useAuth from './useAuth';
 import {
@@ -5,7 +6,9 @@ import {
   getUserInfo,
   getSports,
   getTournamentMatches,
-  getTournamentTeams
+  getTournamentTeams,
+  getSeasons,
+  getSeasonTournaments
 } from '../api/profixioApi';
 
 export const useProfixioTournaments = (orgId, params = {}) => {
@@ -114,6 +117,51 @@ export const useProfixioTournamentTeams = (tournamentId, params = {}) => {
     };
     if (user.idToken && tournamentId) fetchData();
   }, [tournamentId, params, user.idToken]);
+
+  return { data, loading };
+};
+
+export const useProfixioSeasons = (orgId) => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const sportId = 'BB';
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const seasons = await getSeasons(orgId, sportId, user.idToken);
+        setData(seasons.data || []);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    if (user.idToken) fetchData();
+  }, [orgId, user.idToken]);
+
+  return { data, loading };
+};
+
+export const useProfixioSeasonTournaments = (seasonId) => {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const tournaments = await getSeasonTournaments(seasonId, { sportId: 'BB' }, user.idToken);
+        setData(tournaments.data || []);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    if (user.idToken && seasonId) fetchData();
+  }, [seasonId, user.idToken]);
 
   return { data, loading };
 };

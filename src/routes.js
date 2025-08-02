@@ -6,8 +6,9 @@ import {
   MdPerson,
   MdHome,
   MdLock,
-  MdOutlineShoppingCart,
+  MdDirectionsRun,
   MdSportsBasketball,
+  MdTimeline
 } from 'react-icons/md';
 
 // Admin Imports
@@ -18,6 +19,7 @@ import DataTables from 'views/admin/dataTables';
 import RTL from 'views/admin/rtl';
 import Tournaments from 'views/admin/Tournaments';
 import TournamentDetails from 'views/admin/TournamentDetails';
+import Seasons from 'views/admin/Seasons';
 
 // Auth Imports
 import SignInCentered from 'views/auth/signIn';
@@ -34,14 +36,7 @@ const routes = [
     name: 'Distrikt',
     layout: '/admin',
     path: '/distrikt',
-    icon: (
-      <Icon
-        as={MdOutlineShoppingCart}
-        width="20px"
-        height="20px"
-        color="inherit"
-      />
-    ),
+    icon: <Icon as={MdDirectionsRun} width="20px" height="20px" color="inherit" />,
     component: <NFTMarketplace />,
     secondary: true,
   },
@@ -89,6 +84,13 @@ const routes = [
     path: '/tournaments/:tournamentId',
     component: <TournamentDetails />,
     hidden: true,
+  },
+  {
+    name: 'Säsonger',
+    layout: '/admin',
+    path: '/seasons',
+    icon: <Icon as={MdTimeline} width="20px" height="20px" color="inherit" />,
+    component: <Seasons />,
   },
 ];
 

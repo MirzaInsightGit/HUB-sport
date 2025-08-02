@@ -1,3 +1,4 @@
+// src/api/profixioApi.js
 import axios from 'axios';
 
 const BACKEND_URL = 'https://stockholmbasket-express-api-avf6ayfkdnc3b6gn.centralus-01.azurewebsites.net/api/profixio';
@@ -220,6 +221,23 @@ export const getTournamentArenas = async (tournament_id, token) => {
 
 export const getTournamentsForOrg = async (orgId, params = {}, token) => {
   const res = await axios.get(`${BACKEND_URL}/organisations/${orgId}/tournaments`, {
+    params,
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.data;
+};
+
+export const getSeasons = async (orgId, sportId, token) => {
+  const res = await axios.get(`${BACKEND_URL}/organisations/${orgId}/seasons`, {
+    params: { sportId },
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return res.data;
+};
+
+// src/api/profixioApi.js - Add function
+export const getSeasonTournaments = async (season_id, params = {}, token) => {
+  const res = await axios.get(`${BACKEND_URL}/seasons/${season_id}/tournaments`, {
     params,
     headers: { Authorization: `Bearer ${token}` }
   });
