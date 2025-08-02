@@ -1,14 +1,14 @@
-// src/components/SeasonDetails.jsx
+// src/components/SeasonDetails.jsx - Update to handle tree structure
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Box, Heading, Tabs, TabList, TabPanels, Tab, TabPanel, Table, Thead, Tbody, Tr, Th, Td } from '@chakra-ui/react';
+import { Box, Heading, Tabs, TabList, TabPanels, Tab, TabPanel, Table, Thead, Tbody, Tr, Th, Td, Accordion, AccordionItem, AccordionButton, AccordionPanel, AccordionIcon } from '@chakra-ui/react';
 import { useProfixio, useProfixioSeasonTournaments } from '../../hooks/useProfixio';
 import useAuth from '../../hooks/useAuth';
 
 const SeasonDetails = () => {
   const { id } = useParams();
   const { getSeasonMatches, getSeasonDeletedMatches } = useProfixio();
-  const { data: tournaments, loading: tournamentsLoading } = useProfixioSeasonTournaments(id);
+  const { data: tree, loading: tournamentsLoading } = useProfixioSeasonTournaments(id);
   const { user } = useAuth();
   const [matches, setMatches] = useState([]);
   const [deletedMatches, setDeletedMatches] = useState([]);
@@ -43,28 +43,54 @@ const SeasonDetails = () => {
         </TabList>
         <TabPanels>
           <TabPanel>
-            <Table variant="simple">
-              <Thead>
-                <Tr>
-                  <Th>Namn</Th>
-                  <Th>Start</Th>
-                  <Th>Slut</Th>
-                  <Th>Matcher</Th>
-                  <Th>Detaljer</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {tournaments.map((t) => (
-                  <Tr key={t.id}>
-                    <Td>{t.name}</Td>
-                    <Td>{t.start_date || 'N/A'}</Td>
-                    <Td>{t.end_date || 'N/A'}</Td>
-                    <Td>{t.match_count}</Td>
-                    <Td><Link to={`/admin/tournaments/${t.id}`}>Visa</Link></Td>
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
+            <Accordion allowToggle>
+              {tree.map((category) => (
+                <AccordionItem key={category.id}>
+                  <h2>
+                    <AccordionButton>
+                      <Box flex="1" textAlign="left">
+                        {category.name} ({category.divisions.reduce((acc, div) => acc + div.tournaments.length, 0)} tävlingar)
+                      </Box>
+                      <AccordionIcon />
+                    </AccordionButton>
+                  </h2>
+                  <AccordionPanel pb={4}>
+                    {category.divisions.map((division) => (
+                      <AccordionItem key={division.id}>
+                        <h3>
+                          <AccordionButton>
+                            <Box flex="1" textAlign="left">
+                              {division.name}
+                            </Box>
+                            <AccordionIcon />
+                          </AccordionButton>
+                        </h3>
+                        <AccordionPanel pb={4}>
+                          <Table variant="simple">
+                            <Thead>
+                              <Tr>
+                                <Th>Namn</Th>
+                                <Th>Matcher</Th>
+                                <Th>Detaljer</Th>
+                              </Tr>
+                            </Thead>
+                            <Tbody>
+                              {division.tournaments.map((t) => (
+                                <Tr key={t.id}>
+                                  <Td>{t.name}</Td>
+                                  <Td>{t.matchCount}</Td>
+                                  <Td><Link to={`/admin/tournaments/${t.id}`}>Visa</Link></Td>
+                                </Tr>
+                              ))}
+                            </Tbody>
+                          </Table>
+                        </AccordionPanel>
+                      </AccordionItem>
+                    ))}
+                  </AccordionPanel>
+                </AccordionItem>
+              ))}
+            </Accordion>
           </TabPanel>
           <TabPanel>
             <Table variant="simple">

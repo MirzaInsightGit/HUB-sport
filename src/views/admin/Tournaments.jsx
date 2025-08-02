@@ -5,7 +5,7 @@ import { Box, Heading, Text, Table, Thead, Tbody, Tr, Th, Td } from '@chakra-ui/
 
 const Tournaments = () => {
   const orgId = process.env.REACT_APP_PROFIXIO_ORG;
-  const params = { sportId: 'BB', limit: 15, page: 1 };
+  const params = { sportId: 'BB', limit: 249, page: 1 };
   const { data: tournaments, loading: tLoading } = useProfixioTournaments(orgId, params);
   const { data: userInfo, loading: uLoading } = useProfixioUserInfo();
 
