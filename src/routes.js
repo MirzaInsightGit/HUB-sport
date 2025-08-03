@@ -8,7 +8,8 @@ import {
   MdLock,
   MdDirectionsRun,
   MdSportsBasketball,
-  MdTimeline
+  MdTimeline,
+  MdChat
 } from 'react-icons/md';
 
 // Admin Imports
@@ -20,6 +21,7 @@ import RTL from 'views/admin/rtl';
 import Tournaments from 'views/admin/Tournaments';
 import TournamentDetails from 'views/admin/TournamentDetails';
 import Seasons from 'views/admin/Seasons';
+import Chat from "components/Chat"; // Importera
 
 // Auth Imports
 import SignInCentered from 'views/auth/signIn';
@@ -91,6 +93,14 @@ const routes = [
     path: '/seasons',
     icon: <Icon as={MdTimeline} width="20px" height="20px" color="inherit" />,
     component: <Seasons />,
+  },
+  {
+    name: "Chat - Internal",
+    layout: "/admin",
+    path: "/chat",
+    icon: <Icon as={MdChat} width="20px" height="20px" color="inherit" />,
+    component: Chat,
+    hidden: true,
   },
 ];
 

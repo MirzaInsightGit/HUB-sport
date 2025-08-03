@@ -11,6 +11,7 @@ import routes from 'routes.js';
 import Tournaments from '../../views/admin/Tournaments';
 import TournamentDetails from '../../views/admin/TournamentDetails';
 import Seasons from '../../views/admin/Seasons';
+import Chat from "components/Chat";
 
 // Custom Chakra theme
 export default function Dashboard(props) {
@@ -168,6 +169,9 @@ export default function Dashboard(props) {
             ) : null}
             <Box>
               <Footer />
+            </Box>
+            <Box position="fixed" bottom="20px" right="20px" zIndex="1000">
+              <Chat />
             </Box>
           </Box>
         </SidebarContext.Provider>

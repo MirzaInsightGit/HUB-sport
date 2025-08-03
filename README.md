@@ -6,16 +6,16 @@ Fullstack React + Azure-baserad sportplattform för distrikts- och lagadministra
 
 Detta projekt syftar till att skapa en komplett sportportal för Stockholm Basket och övriga användargrupper, med följande funktionalitet:
 
-- Inloggning med Microsoft Entra (Azure AD B2C)
-- Rollbaserad åtkomst (Admin, Coach, User)
-- Integration mot Express API (Azure)
-- Headless WooCommerce-integration (API)
-- Redigering och hantering av spelardata (inkl. betyg, kommentarer, uppladdning av bilder per lägermoment)
-- Synkronisering mot CosmosDB / Microsoft-ekosystemet
-- Automatisk import av ordrar / anmälningar från WordPress
-- Designad med Chakra UI och React, inspirerad av templates från [mantisdashboard.io](https://mantisdashboard.io) för enkel och mobilvänlig dashboard
-- Komplett support för coach-vy, adminpanel, spelare och läger (inkl. DLT: Distriktslag Uttagningar med 5 läger, hantering av WooCommerce-anmälningar, betalningar till Fortnox)
-- Fullt hostad i Azure Static Web App + Azure Express API
+- Inloggning med Microsoft Entra (Azure AD B2C) - KLAR
+- Rollbaserad åtkomst (Admin, Coach, User) - KLAR
+- Integration mot Express API (Azure) - KLAR
+- Headless WooCommerce-integration (API) - KLAR
+- Redigering och hantering av spelardata (inkl. betyg, kommentarer, uppladdning av bilder per lägermoment) - KLAR
+- Synkronisering mot CosmosDB / Microsoft-ekosystemet - KLAR
+- Automatisk import av ordrar / anmälningar från WordPress - KLAR
+- Designad med Chakra UI och React, inspirerad av templates från [mantisdashboard.io](https://mantisdashboard.io) för enkel och mobilvänlig dashboard - KLAR
+- Komplett support för coach-vy, adminpanel, spelare och läger (inkl. DLT: Distriktslag Uttagningar med 5 läger, hantering av WooCommerce-anmälningar) - KLAR
+- Fullt hostad i Azure Static Web App + Azure Express API - KLAR
 - Integration med Profixio för matchhantering, domaradministration och bokning
 - Möjlighet till subdomäner för distrikt, t.ex. projektx.stockholmbasket.se
 - Centraliserad plattform för kommunikation, ersätter WhatsApp/Messenger, med fokus på domare och administration

@@ -7,6 +7,7 @@ import { ChakraProvider } from '@chakra-ui/react';
 import initialTheme from './theme/theme';
 import { useState } from 'react';
 import { MsalProvider, useIsAuthenticated } from '@azure/msal-react';
+import Chat from './components/Chat'; // Importera Chat
 
 const PrivateRoute = ({ children }) => {
   const isAuthenticated = useIsAuthenticated();
@@ -38,6 +39,14 @@ export default function App({ msalInstance }) {
             }
           />
           <Route path="/" element={<Navigate to="/admin/default" replace />} />
+          <Route
+            path="admin/chat"
+            element={
+              <PrivateRoute>
+                <Chat />
+              </PrivateRoute>
+            }
+          />
         </Routes>
       </ChakraProvider>
     </MsalProvider>

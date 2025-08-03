@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from "react";
 import {
-  Box,
-  Text,
-  VStack,
+  Box, Text, VStack, HStack, Avatar, Tabs, TabList, TabPanels, Tab, TabPanel,
+  FormControl, FormLabel, Input, Button, Stat, StatLabel, StatNumber,
 } from "@chakra-ui/react";
 import Card from "components/card/Card.js";
 import { useMsal } from "@azure/msal-react";
 import { InteractionRequiredAuthError } from "@azure/msal-browser";
 import { Client } from "@microsoft/microsoft-graph-client";
-import "isomorphic-fetch";
 import { loginRequest } from "authConfig";
 
 export default function UserReports() {
@@ -39,6 +37,8 @@ export default function UserReports() {
     faxNumber: "",
     preferredLanguage: "",
     accountEnabled: true,
+    managerName: "",
+    photoUrl: "",
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -51,11 +51,29 @@ export default function UserReports() {
         setError(null);
         const tokenResponse = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
         const graphClient = Client.init({
-          authProvider: {
-            getAccessToken: () => Promise.resolve(tokenResponse.accessToken),
+          authProvider: (done) => {
+            done(null, tokenResponse.accessToken);
           },
         });
-        const user = await graphClient.api("/me").get();
+        const selectProps = 'displayName,givenName,surname,userPrincipalName,id,userType,createdDateTime,jobTitle,companyName,department,employeeId,employeeType,employeeHireDate,officeLocation,streetAddress,city,state,postalCode,country,businessPhones,mobilePhone,mail,facsimileTelephoneNumber,preferredLanguage,accountEnabled';
+        const user = await graphClient.api("/me").select(selectProps).get();
+        
+        let managerName = "N/A";
+        try {
+          const manager = await graphClient.api("/me/manager").get();
+          managerName = manager?.displayName || "N/A";
+        } catch (managerError) {
+          console.error("Manager fetch error:", managerError);
+        }
+        
+        let photoUrl = "";
+        try {
+          const photoResponse = await graphClient.api("/me/photo/$value").get();
+          photoUrl = URL.createObjectURL(photoResponse);
+        } catch (photoError) {
+          console.error("Photo fetch error:", photoError);
+        }
+        
         setProfileData((prev) => ({
           ...prev,
           displayName: user.displayName || prev.displayName,
@@ -83,6 +101,8 @@ export default function UserReports() {
           faxNumber: user.facsimileTelephoneNumber || "",
           preferredLanguage: user.preferredLanguage || "",
           accountEnabled: user.accountEnabled,
+          managerName: managerName,
+          photoUrl: photoUrl,
         }));
       } catch (error) {
         if (error instanceof InteractionRequiredAuthError) {
@@ -100,38 +120,114 @@ export default function UserReports() {
   }, [instance, accounts]);
 
   return (
-    <Box pt={{ base: "130px", md: "80px", xl: "80px" }}>
+    <Box pt={{ base: "130px", md: "80px", xl: "80px" }} bg="gray.50">
       {isLoading && <Text>Laddar profil...</Text>}
-      {error && <Text>Fel: {error}</Text>}
-      <Card mt="20px">
-        <Text fontSize="2xl" fontWeight="700">Profilinställningar</Text>
-        <VStack spacing="4" align="stretch" mt="4">
-          <Text>Display name: {profileData.displayName}</Text>
-          <Text>First name: {profileData.givenName}</Text>
-          <Text>Last name: {profileData.surname}</Text>
-          <Text>User principal name: {profileData.userPrincipalName}</Text>
-          <Text>Object ID: {profileData.id}</Text>
-          <Text>User type: {profileData.userType}</Text>
-          <Text>Created date time: {profileData.createdDateTime}</Text>
-          <Text>Job title: {profileData.jobTitle}</Text>
-          <Text>Company name: {profileData.companyName}</Text>
-          <Text>Department: {profileData.department}</Text>
-          <Text>Employee ID: {profileData.employeeId}</Text>
-          <Text>Employee type: {profileData.employeeType}</Text>
-          <Text>Employee hire date: {profileData.employeeHireDate}</Text>
-          <Text>Office location: {profileData.officeLocation}</Text>
-          <Text>Street address: {profileData.streetAddress}</Text>
-          <Text>City: {profileData.city}</Text>
-          <Text>State or province: {profileData.state}</Text>
-          <Text>ZIP or postal code: {profileData.postalCode}</Text>
-          <Text>Country or region: {profileData.country}</Text>
-          <Text>Business phone: {profileData.businessPhones.join(', ')}</Text>
-          <Text>Mobile phone: {profileData.mobilePhone}</Text>
-          <Text>Email: {profileData.mail}</Text>
-          <Text>Fax number: {profileData.faxNumber}</Text>
-          <Text>Preferred language: {profileData.preferredLanguage}</Text>
-          <Text>Account enabled: {profileData.accountEnabled ? "Yes" : "No"}</Text>
-        </VStack>
+      {error && <Text color="red.500">Fel: {error}</Text>}
+      <Card mt="20px" boxShadow="lg" borderRadius="lg" overflow="hidden">
+       
+        {/* Profile Header */}
+        <HStack spacing="4" px="6" pt="6" align="flex-start">
+          <Avatar size="2xl" name={profileData.displayName} src={profileData.photoUrl} border="4px solid white" />
+          <VStack align="start" spacing="1">
+            <Text fontSize="2xl" fontWeight="bold">{profileData.displayName}</Text>
+            <Text color="gray.500">{profileData.jobTitle}</Text>
+            <Text color="gray.500">Manager: {profileData.managerName}</Text>
+          </VStack>
+        </HStack>
+        {/* Stats */}
+        <HStack px="6" mt="4" spacing="8">
+          <Stat>
+            <StatLabel>Skapad</StatLabel>
+            <StatNumber>{profileData.createdDateTime}</StatNumber>
+          </Stat>
+          <Stat>
+            <StatLabel>Anställd ID</StatLabel>
+            <StatNumber>{profileData.employeeId || "N/A"}</StatNumber>
+          </Stat>
+        </HStack>
+        {/* Tabs */}
+        <Tabs mt="6" variant="enclosed">
+          <TabList>
+            <Tab>Kontoinställningar</Tab>
+            <Tab>Företagsinställningar</Tab>
+            <Tab>Notiser</Tab>
+          </TabList>
+          <TabPanels>
+            <TabPanel>
+              <VStack spacing="4" align="stretch">
+                <HStack spacing="4">
+                  <FormControl>
+                    <FormLabel>Förnamn</FormLabel>
+                    <Input value={profileData.givenName} isReadOnly />
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel>Efternamn</FormLabel>
+                    <Input value={profileData.surname} isReadOnly />
+                  </FormControl>
+                </HStack>
+                <FormControl>
+                  <FormLabel>E-post</FormLabel>
+                  <Input value={profileData.mail} isReadOnly />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Telefon</FormLabel>
+                  <Input value={profileData.mobilePhone || profileData.businessPhones[0]} isReadOnly />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Gatuadress</FormLabel>
+                  <Input value={profileData.streetAddress} isReadOnly />
+                </FormControl>
+                <HStack spacing="4">
+                  <FormControl>
+                    <FormLabel>Stad</FormLabel>
+                    <Input value={profileData.city} isReadOnly />
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel>Delstat/Provins</FormLabel>
+                    <Input value={profileData.state} isReadOnly />
+                  </FormControl>
+                </HStack>
+                <HStack spacing="4">
+                  <FormControl>
+                    <FormLabel>Postnummer</FormLabel>
+                    <Input value={profileData.postalCode} isReadOnly />
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel>Land</FormLabel>
+                    <Input value={profileData.country} isReadOnly />
+                  </FormControl>
+                </HStack>
+              </VStack>
+            </TabPanel>
+            <TabPanel>
+              <VStack spacing="4" align="stretch">
+                <FormControl>
+                  <FormLabel>Företagsnamn</FormLabel>
+                  <Input value={profileData.companyName} isReadOnly />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Avdelning</FormLabel>
+                  <Input value={profileData.department} isReadOnly />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Kontor</FormLabel>
+                  <Input value={profileData.officeLocation} isReadOnly />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Anställningstyp</FormLabel>
+                  <Input value={profileData.employeeType} isReadOnly />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Anställningsdatum</FormLabel>
+                  <Input value={profileData.employeeHireDate} isReadOnly />
+                </FormControl>
+              </VStack>
+            </TabPanel>
+            <TabPanel>
+              <Text>Notiser-inställningar (implementera senare)</Text>
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
       </Card>
     </Box>
   );
