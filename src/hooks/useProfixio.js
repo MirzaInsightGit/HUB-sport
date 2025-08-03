@@ -152,8 +152,8 @@ export const useProfixioSeasonTournaments = (seasonId) => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const tree = await getSeasonTournaments(seasonId, {}, user.idToken);
-        setData(tree || []);
+        const tournaments = await getSeasonTournaments(seasonId, { sportId: 'BB', categoryId: '499' }, user.idToken);
+        setData(tournaments.data || []);
       } catch (error) {
         console.error(error);
       } finally {
@@ -165,4 +165,3 @@ export const useProfixioSeasonTournaments = (seasonId) => {
 
   return { data, loading };
 };
-

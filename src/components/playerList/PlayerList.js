@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
@@ -13,12 +13,21 @@ const camps = ['Läger 1', 'Läger 2', 'Läger 3', 'Läger 4', 'Läger 5'];
 const categories = ['bollkontroll', 'forsvar', 'anfall', 'kommunikation', 'sociala', 'styrka', 'spelforstaelse'];
 const categoryTitles = ['Bollkontroll', 'Försvar', 'Anfall', 'Kommunikation', 'Sociala egenskaper', 'Styrka/Kondition', 'Spelförståelse'];
 
+const campProducts = {
+  0: 18801, // Läger 1
+  1: 18867, // Läger 2
+  2: 18868, // Läger 3
+  3: 0,     // Läger 4 - placeholder
+  4: 0      // Läger 5 - placeholder
+};
+
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
   const textColor = useColorModeValue("navy.700", "white");
   const { accounts } = useMsal();
   const currentUser = accounts[0] ? accounts[0].name : 'Unknown';
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const gridRef = useRef();
 
   const container = useMemo(() => {
     const cosmosClient = new CosmosClient({
@@ -46,7 +55,14 @@ const PlayerList = () => {
       console.log('Orders fetched:', response.data.length);
       const playersMap = new Map();
       response.data.forEach(order => {
-        if (order.line_items.some(item => item.product_id === 18801)) {
+        const purchasedCamps = [];
+        order.line_items.forEach(item => {
+          const campIndex = Object.entries(campProducts).find(([key, val]) => val === item.product_id)?.[0];
+          if (campIndex !== undefined) {
+            purchasedCamps.push(parseInt(campIndex));
+          }
+        });
+        if (purchasedCamps.length > 0) {
           const email = order.billing.email;
           if (email) {
             if (!playersMap.has(email)) {
@@ -65,27 +81,16 @@ const PlayerList = () => {
                 basket_position: getMeta('dlt_basket_position'),
                 aktuellserie: getMeta('dlt_aktuellserie'),
                 alderspelare: getMeta('dlt_alderspelare'),
-                payments: 0,
-                ratings: camps.map(() => ({})),
-                comments: camps.map(() => ({ value: '', by: '', timestamp: '' })),
                 registeredCamps: camps.map(() => false)
               });
             }
-            playersMap.get(email).payments += 1;
+            purchasedCamps.forEach(campIndex => {
+              playersMap.get(email).registeredCamps[campIndex] = true;
+            });
           }
         }
       });
       const players = Array.from(playersMap.values());
-      players.forEach(player => {
-        const payments = player.payments;
-        player.registeredCamps = [
-          payments >= 1,
-          payments >= 2,
-          payments >= 2,
-          payments >= 3,
-          payments >= 3
-        ];
-      });
       for (let player of players) {
         try {
           const { resources } = await container.items.query({
@@ -213,6 +218,61 @@ const PlayerList = () => {
     return value + by + ts;
   };
 
+  const onGridReady = (params) => {
+    gridRef.current.api = params.api;
+    setTimeout(() => addDots(params.api), 500);
+  };
+
+  const addDots = (api) => {
+    const scrollViewport = document.querySelector('.ag-body-horizontal-scroll-viewport');
+    if (!scrollViewport) return;
+    const scrollWidth = scrollViewport.scrollWidth;
+    const clientWidth = scrollViewport.clientWidth;
+    const dotContainer = document.createElement('div');
+    dotContainer.style.position = 'absolute';
+    dotContainer.style.bottom = '0';
+    dotContainer.style.left = '0';
+    dotContainer.style.width = '100%';
+    dotContainer.style.height = '30px';
+    dotContainer.style.pointerEvents = 'none';
+    dotContainer.style.background = 'linear-gradient(to right, #ff0000, #ff0000)'; // Red line like YouTube
+    dotContainer.style.height = '2px';
+    const progressBar = document.createElement('div');
+    progressBar.style.position = 'absolute';
+    progressBar.style.left = '0';
+    progressBar.style.bottom = '0';
+    progressBar.style.height = '2px';
+    progressBar.style.backgroundColor = '#ff0000';
+    progressBar.style.width = '0%';
+    dotContainer.appendChild(progressBar);
+    scrollViewport.addEventListener('scroll', () => {
+      const scrollLeft = scrollViewport.scrollLeft;
+      const progress = (scrollLeft / (scrollWidth - clientWidth)) * 100;
+      progressBar.style.width = `${progress}%`;
+    });
+    camps.forEach((camp, index) => {
+      const columnGroup = api.getColumnGroup(camp);
+      if (columnGroup) {
+        const left = columnGroup.getLeft();
+        const position = (left / (scrollWidth - clientWidth)) * 100;
+        const dot = document.createElement('div');
+        dot.style.position = 'absolute';
+        dot.style.left = `${position}%`;
+        dot.style.bottom = '10px';
+        dot.style.width = '12px';
+        dot.style.height = '12px';
+        dot.style.backgroundColor = '#ff0000';
+        dot.style.borderRadius = '50%';
+        dot.style.cursor = 'pointer';
+        dot.style.pointerEvents = 'auto';
+        dot.title = camp;
+        dot.onclick = () => api.ensureColumnVisible(columnGroup.getColGroupDef().children[0].colId, 'start');
+        dotContainer.appendChild(dot);
+      }
+    });
+    scrollViewport.appendChild(dotContainer);
+  };
+
   const columnDefs = useMemo(() => [
     { headerName: 'Spelarnamn', field: 'spelarnamn', sortable: true, filter: true, pinned: 'left' },
     { headerName: 'Kön', field: 'kon', sortable: true, filter: true },
@@ -289,11 +349,11 @@ const PlayerList = () => {
       <Flex justify='space-between' align='center' mb='4'>
         <Heading size='lg' color={textColor}>Registrerade Spelare till DLT</Heading>
         <Flex>
-          <Button variant='brand' size='sm'>Fyll i, allt sparas automatiskt</Button>
-          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg Info</Button>
+          <Button variant='brand' size='sm'>Ni kan endast fylla i läger betyg. </Button>
+          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg Info - Läs mer</Button>
         </Flex>
       </Flex>
-      <Text mb='4' color='secondaryGray.600'>Hantera spelare och betyg</Text>
+      <Text mb='4' color='secondaryGray.600'>Du ser endast godkända och registrerade spelare, scrolla för att hitta till olika läger.</Text>
       <style>
         {`
           .camp-header-0 { background-color: #f0f8ff; } /* AliceBlue for Läger 1 */
@@ -301,16 +361,23 @@ const PlayerList = () => {
           .camp-header-2 { background-color: #fffacd; } /* LemonChiffon for Läger 3 */
           .camp-header-3 { background-color: #fafad2; } /* LightGoldenrodYellow for Läger 4 */
           .camp-header-4 { background-color: #f0fff0; } /* Honeydew for Läger 5 */
+          .ag-body-horizontal-scroll { height: 30px !important; }
+          .ag-body-horizontal-scroll-viewport { background-color: #ccc; }
+          .ag-body-horizontal-scroll-container { background-color: #ccc; }
+          .ag-horizontal-left-spacer, .ag-horizontal-right-spacer { background-color: #ccc; }
+          .ag-body-horizontal-scroll-thumb { background-color: #555; height: 30px; border-radius: 5px; }
         `}
       </style>
       <div className="ag-theme-quartz" style={{ height: 650, width: '100%' }}>
         <AgGridReact
+          ref={gridRef}
           rowData={rowData}
           columnDefs={columnDefs}
           pagination={true}
           paginationPageSize={50}
           getRowStyle={getRowStyle}
           stopEditingWhenCellsLoseFocus={true}
+          onGridReady={onGridReady}
         />
       </div>
       <Modal isOpen={isOpen} onClose={onClose} size="xl">
@@ -319,7 +386,7 @@ const PlayerList = () => {
           <ModalHeader>Betyg Förklaringar</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
-            <Text mb="4">Ange betyg för varje läger och kategori A-F, där A är högsta betyget. Allt sparas automatiskt i Azure Cosmos DB.</Text>
+            <Text mb="4">Ange betyg för varje läger och kategori A-F, där A är högsta betyget. Allt sparas automatiskt i Databsen hos Stockholm Basket.</Text>
             {renderCategoryInfo('Bollkontroll', 'Spelarens teknik med boll, förmåga att hantera press, dribbla med båda händer, samt kontroll under matchtempo. Bedömning grundas på bollsäkerhet, rytm och kreativitet i spelet.')}
             {renderCategoryInfo('Försvar', 'Individens förmåga att hålla sin spelare, förstå rotationsprinciper, sätta press, hjälpa laget och visa fysisk samt mental närvaro i försvarsspelet.')}
             {renderCategoryInfo('Anfall', 'Hur spelaren rör sig utan boll, beslutsfattande i 1v1, avslutsförmåga, spelförståelse i passningar och tempo, samt helhet i anfallsspelet.')}
