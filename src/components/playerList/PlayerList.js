@@ -9,62 +9,9 @@ import { useMsal } from "@azure/msal-react";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-class DetailedRatingEditor extends React.Component {
-  constructor(props) {
-    super(props);
-    const lastRating = props.value || {};
-    this.state = {
-      bollkontroll: lastRating.bollkontroll || 'F',
-      forsvar: lastRating.forsvar || 'F',
-      anfall: lastRating.anfall || 'F',
-      kommunikation: lastRating.kommunikation || 'F',
-      sociala: lastRating.sociala || 'F',
-      styrka: lastRating.styrka || 'F',
-      spelforstaelse: lastRating.spelforstaelse || 'F'
-    };
-  }
-
-  getValue() {
-    return this.state;
-  }
-
-  isPopup() {
-    return true;
-  }
-
-  onChange = (category, newValue) => {
-    this.setState({ [category]: newValue });
-  }
-
-  renderCategory = (category, title) => {
-    const value = this.state[category];
-    return (
-      <div style={{ marginBottom: '15px', width: '100%' }}>
-        <h4 style={{ marginBottom: '5px' }}>{title}</h4>
-        <select value={value} onChange={(e) => this.onChange(category, e.target.value)} style={{ width: '100%', padding: '5px' }}>
-          {['A', 'B', 'C', 'D', 'E', 'F'].map((grade) => (
-            <option key={grade} value={grade}>{grade}</option>
-          ))}
-        </select>
-      </div>
-    );
-  }
-
-  render() {
-    return (
-      <div style={{ padding: '20px', backgroundColor: 'white', border: '1px solid gray', borderRadius: '5px', maxHeight: '400px', overflowY: 'auto', minWidth: '300px' }}>
-        {this.renderCategory('bollkontroll', 'Bollkontroll')}
-        {this.renderCategory('forsvar', 'Försvar')}
-        {this.renderCategory('anfall', 'Anfall')}
-        {this.renderCategory('kommunikation', 'Kommunikation')}
-        {this.renderCategory('sociala', 'Sociala egenskaper')}
-        {this.renderCategory('styrka', 'Styrka/Kondition')}
-        {this.renderCategory('spelforstaelse', 'Spelförståelse')}
-        <button onClick={this.props.stopEditing} style={{ marginTop: '15px', padding: '8px 16px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Bekräfta</button>
-      </div>
-    );
-  }
-}
+const camps = ['Läger 1', 'Läger 2', 'Läger 3', 'Läger 4', 'Läger 5'];
+const categories = ['bollkontroll', 'forsvar', 'anfall', 'kommunikation', 'sociala', 'styrka', 'spelforstaelse'];
+const categoryTitles = ['Bollkontroll', 'Försvar', 'Anfall', 'Kommunikation', 'Sociala egenskaper', 'Styrka/Kondition', 'Spelförståelse'];
 
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
@@ -97,51 +44,82 @@ const PlayerList = () => {
         }
       });
       console.log('Orders fetched:', response.data.length);
-      const filteredOrders = response.data.filter(order => 
-        order.line_items.some(item => item.product_id === 18801)
-      );
-      let players = filteredOrders.map(order => {
-        const getMeta = (key) => order.meta_data.find(m => m.key === key)?.value || '';
-        console.log('Order meta for', order.id, order.meta_data);
-        return {
-          id: order.id.toString(),
-          name: `${order.billing.first_name} ${order.billing.last_name}`,
-          email: order.billing.email,
-          phone: order.billing.phone || '',
-          address: `${order.billing.address_1}, ${order.billing.city}` || '',
-          rating: [],
-          comments: { value: '', by: '', timestamp: '' },
-          spelarnamn: getMeta('dlt_spelarnamn'),
-          kon: getMeta('dlt_kon'),
-          mobilnummer: getMeta('dlt_mobilnummer'),
-          spelarmejl: getMeta('dlt_spelarmejl'),
-          klubblag: getMeta('dlt_klubblag'),
-          basket_position: getMeta('dlt_basket_position'),
-          aktuellserie: getMeta('dlt_aktuellserie'),
-          alderspelare: getMeta('dlt_alderspelare')
-        };
+      const playersMap = new Map();
+      response.data.forEach(order => {
+        if (order.line_items.some(item => item.product_id === 18801)) {
+          const email = order.billing.email;
+          if (email) {
+            if (!playersMap.has(email)) {
+              const getMeta = (key) => order.meta_data.find(m => m.key === key)?.value || '';
+              playersMap.set(email, {
+                id: email,
+                name: `${order.billing.first_name} ${order.billing.last_name}`,
+                email,
+                phone: order.billing.phone || '',
+                address: `${order.billing.address_1}, ${order.billing.city}` || '',
+                spelarnamn: getMeta('dlt_spelarnamn'),
+                kon: getMeta('dlt_kon'),
+                mobilnummer: getMeta('dlt_mobilnummer'),
+                spelarmejl: getMeta('dlt_spelarmejl'),
+                klubblag: getMeta('dlt_klubblag'),
+                basket_position: getMeta('dlt_basket_position'),
+                aktuellserie: getMeta('dlt_aktuellserie'),
+                alderspelare: getMeta('dlt_alderspelare'),
+                payments: 0,
+                ratings: camps.map(() => ({})),
+                comments: camps.map(() => ({ value: '', by: '', timestamp: '' })),
+                registeredCamps: camps.map(() => false)
+              });
+            }
+            playersMap.get(email).payments += 1;
+          }
+        }
+      });
+      const players = Array.from(playersMap.values());
+      players.forEach(player => {
+        const payments = player.payments;
+        player.registeredCamps = [
+          payments >= 1,
+          payments >= 2,
+          payments >= 2,
+          payments >= 3,
+          payments >= 3
+        ];
       });
       for (let player of players) {
         try {
-          const querySpec = {
+          const { resources } = await container.items.query({
             query: "SELECT * FROM c WHERE c.id = @id",
             parameters: [{ name: "@id", value: player.id }]
-          };
-          const { resources } = await container.items.query(querySpec).fetchAll();
+          }).fetchAll();
           if (resources.length > 0) {
             const resource = resources[0];
-            player.rating = resource.rating || [];
-            let comments = resource.comments || { value: '', by: '', timestamp: '' };
-            if (typeof comments === 'string') {
-              comments = { value: comments, by: '', timestamp: '' };
+            let ratings = resource.ratings || camps.map(() => ({}));
+            if (!Array.isArray(ratings) || ratings.length !== camps.length) {
+              ratings = camps.map(() => ({}));
+              if (Array.isArray(resource.rating)) {
+                ratings[0] = resource.rating[resource.rating.length - 1] || {};
+              } else if (resource.rating && typeof resource.rating === 'object') {
+                ratings[0] = resource.rating;
+              }
             }
+            let comments = resource.comments || camps.map(() => ({ value: '', by: '', timestamp: '' }));
+            if (!Array.isArray(comments) || comments.length !== camps.length) {
+              comments = camps.map(() => ({ value: '', by: '', timestamp: '' }));
+              if (typeof resource.comments === 'string') {
+                comments[0] = { value: resource.comments, by: '', timestamp: '' };
+              } else if (resource.comments && typeof resource.comments === 'object') {
+                comments[0] = { value: resource.comments.value || '', by: resource.comments.by || '', timestamp: resource.comments.timestamp || '' };
+              }
+            }
+            player.ratings = ratings;
             player.comments = comments;
             console.log('Loaded data for player', player.id, resource);
           } else {
             const item = {
               id: player.id,
-              rating: [],
-              comments: { value: '', by: '', timestamp: '' }
+              ratings: camps.map(() => ({})),
+              comments: camps.map(() => ({ value: '', by: '', timestamp: '' }))
             };
             await container.items.upsert(item, { partitionKey: player.id });
             console.log('Created new entry for player', player.id);
@@ -160,41 +138,44 @@ const PlayerList = () => {
     fetchPlayers();
   }, [fetchPlayers]);
 
+  const savePlayerData = async (playerId, data) => {
+    try {
+      const { resource } = await container.items.upsert(data, { partitionKey: playerId });
+      console.log('Saved to Cosmos:', resource);
+    } catch (err) {
+      console.error('Error saving to Cosmos:', err.message, err.code);
+    }
+  };
+
   const onCellValueChanged = async (params) => {
     console.log('Cell value changed', params.colDef.headerName, 'old:', params.oldValue, 'new:', params.newValue);
+    const campIndex = params.colDef.campIndex;
+    const cat = params.colDef.cat;
     let needSave = false;
-    if (params.colDef.headerName === 'Betyg') {
-      const oldRating = params.oldValue || {};
-      const newRating = params.newValue || {};
-      const categories = ['bollkontroll', 'forsvar', 'anfall', 'kommunikation', 'sociala', 'styrka', 'spelforstaelse'];
-      const oldVals = categories.reduce((acc, key) => { acc[key] = oldRating[key] || 'F'; return acc; }, {});
-      const newVals = categories.reduce((acc, key) => { acc[key] = newRating[key] || 'F'; return acc; }, {});
-      if (JSON.stringify(oldVals) !== JSON.stringify(newVals)) {
-        params.data.rating.push({ ...newRating, by: currentUser, timestamp: new Date().toISOString() });
+    if (cat) {
+      if (params.oldValue !== params.newValue) {
+        params.data.ratings[campIndex][cat] = params.newValue;
+        params.data.ratings[campIndex].by = currentUser;
+        params.data.ratings[campIndex].timestamp = new Date().toISOString();
         needSave = true;
+        params.api.refreshCells({ columns: [`average_${campIndex}`], rowNodes: [params.node], force: true });
       }
     } else if (params.colDef.headerName === 'Kommentarer') {
       if (params.oldValue !== params.newValue) {
-        params.data.comments.by = currentUser;
-        params.data.comments.timestamp = new Date().toISOString();
+        params.data.comments[campIndex].value = params.newValue;
+        params.data.comments[campIndex].by = currentUser;
+        params.data.comments[campIndex].timestamp = new Date().toISOString();
         needSave = true;
       }
     }
     if (needSave) {
-      try {
-        const item = {
-          id: params.data.id,
-          rating: params.data.rating,
-          comments: params.data.comments
-        };
-        console.log('About to upsert:', item);
-        await container.items.upsert(item, { partitionKey: params.data.id });
-        console.log('Successfully saved to Cosmos:', params.data);
-      } catch (err) {
-        console.error('Error saving to Cosmos:', err);
-      }
+      const item = {
+        id: params.data.id,
+        ratings: params.data.ratings,
+        comments: params.data.comments
+      };
+      await savePlayerData(params.data.id, item);
     }
-    params.api.refreshCells({ rowNodes: [params.node], force: true });
   };
 
   const getRowStyle = (params) => {
@@ -210,59 +191,91 @@ const PlayerList = () => {
     return map[grade] || 0;
   };
 
-  const ratingRenderer = (params) => {
-    if (!params.data.rating || params.data.rating.length === 0) return 'F (genomsnitt)';
-    const last = params.data.rating[params.data.rating.length - 1];
-    const values = ['bollkontroll', 'forsvar', 'anfall', 'kommunikation', 'sociala', 'styrka', 'spelforstaelse'].map(key => gradeToNumber(last[key]));
-    const averageNum = (values.reduce((a, b) => a + b, 0) / 7);
-    const averageGrade = ['A', 'B', 'C', 'D', 'E', 'F'][5 - Math.round(averageNum)];
-    const by = last.by ? ` by ${last.by}` : '';
-    const ts = last.timestamp ? ` at ${new Date(last.timestamp).toLocaleString()}` : '';
+  const calculateAverage = (rating) => {
+    const values = categories.map(key => gradeToNumber(rating[key]));
+    const averageNum = (values.reduce((a, b) => a + b, 0) / categories.length);
+    return ['A', 'B', 'C', 'D', 'E', 'F'][5 - Math.round(averageNum)];
+  };
+
+  const ratingAverageRenderer = (params, campIndex) => {
+    const rating = params.data.ratings[campIndex] || {};
+    const averageGrade = calculateAverage(rating);
+    const by = rating.by ? ` by ${rating.by}` : '';
+    const ts = rating.timestamp ? ` at ${new Date(rating.timestamp).toLocaleString()}` : '';
     return averageGrade + ' (genomsnitt)' + by + ts;
   };
 
-  const commentsRenderer = (params) => {
-    const value = params.data.comments.value || '';
-    const by = params.data.comments.by ? ` by ${params.data.comments.by}` : '';
-    const ts = params.data.comments.timestamp ? ` at ${new Date(params.data.comments.timestamp).toLocaleString()}` : '';
+  const commentsRenderer = (params, campIndex) => {
+    const comment = params.data.comments[campIndex] || { value: '', by: '', timestamp: '' };
+    const value = comment.value || '';
+    const by = comment.by ? ` by ${comment.by}` : '';
+    const ts = comment.timestamp ? ` at ${new Date(comment.timestamp).toLocaleString()}` : '';
     return value + by + ts;
   };
 
-  const columnDefs = [
-    { headerName: 'Spelarnamn', field: 'spelarnamn', sortable: true, filter: true },
+  const columnDefs = useMemo(() => [
+    { headerName: 'Spelarnamn', field: 'spelarnamn', sortable: true, filter: true, pinned: 'left' },
     { headerName: 'Kön', field: 'kon', sortable: true, filter: true },
     { headerName: 'Ålderspelare', field: 'alderspelare', sortable: true, filter: true },
     { headerName: 'Klubblag', field: 'klubblag', sortable: true, filter: true },
     { headerName: 'Basket Position', field: 'basket_position', sortable: true, filter: true },
     { headerName: 'Aktuell Serie', field: 'aktuellserie', sortable: true, filter: true },
-    { 
-      headerName: 'Betyg', 
-      editable: true,
-      cellRenderer: ratingRenderer,
-      cellEditor: DetailedRatingEditor,
-      cellEditorPopup: true,
-      valueGetter: (params) => params.data.rating.length > 0 ? params.data.rating[params.data.rating.length - 1] : {},
-      valueSetter: (params) => true
-    },
-    { 
-      headerName: 'Kommentarer', 
-      editable: true, 
-      cellEditor: 'agLargeTextCellEditor', 
-      cellRenderer: commentsRenderer,
-      width: 400,
-      valueGetter: (params) => params.data.comments.value,
-      valueSetter: (params) => {
-        params.data.comments.value = params.newValue;
-        return true;
-      }
-    },
     { headerName: 'Mobilnummer', field: 'mobilnummer', sortable: true, filter: true },
     { headerName: 'Spelarmejl', field: 'spelarmejl', sortable: true, filter: true },
     { headerName: 'Föräldrar namn', field: 'name', sortable: true, filter: true },
     { headerName: 'Föräldrar Email', field: 'email', sortable: true, filter: true },
     { headerName: 'Föräldrar Telefon', field: 'phone', sortable: true, filter: true },
     { headerName: 'Föräldrar Adress', field: 'address', sortable: true, filter: true },
-  ];
+    ...camps.flatMap((camp, campIndex) => [
+      {
+        headerName: `${camp} Anmäld`,
+        valueGetter: (params) => params.data.registeredCamps[campIndex] ? 'Ja' : 'Nej',
+        width: 120
+      },
+      {
+        headerName: camp,
+        headerClass: `camp-header-${campIndex}`,
+        children: [
+          ...categories.map((cat, catIndex) => ({
+            headerName: categoryTitles[catIndex],
+            editable: (params) => params.data.registeredCamps[campIndex],
+            cellEditor: 'agSelectCellEditor',
+            cellEditorParams: { values: ['A', 'B', 'C', 'D', 'E', 'F'] },
+            valueGetter: (params) => params.data.ratings[campIndex][cat] || 'F',
+            valueSetter: (params) => {
+              params.data.ratings[campIndex][cat] = params.newValue;
+              return true;
+            },
+            onCellValueChanged,
+            campIndex,
+            cat
+          })),
+          {
+            headerName: 'Genomsnitt',
+            cellRenderer: (params) => ratingAverageRenderer(params, campIndex),
+            valueGetter: (params) => calculateAverage(params.data.ratings[campIndex] || {}),
+            colId: `average_${campIndex}`
+          },
+          {
+            headerName: 'Kommentarer',
+            editable: (params) => params.data.registeredCamps[campIndex],
+            cellEditor: 'agLargeTextCellEditor',
+            cellRenderer: (params) => commentsRenderer(params, campIndex),
+            width: 300,
+            valueGetter: (params) => params.data.comments[campIndex]?.value || '',
+            valueSetter: (params) => {
+              if (!params.data.comments[campIndex]) {
+                params.data.comments[campIndex] = { value: '', by: '', timestamp: '' };
+              }
+              params.data.comments[campIndex].value = params.newValue;
+              return true;
+            },
+            onCellValueChanged
+          }
+        ]
+      }
+    ])
+  ], []);
 
   const renderCategoryInfo = (title, description) => (
     <Box key={title} mb="4">
@@ -281,13 +294,21 @@ const PlayerList = () => {
         </Flex>
       </Flex>
       <Text mb='4' color='secondaryGray.600'>Hantera spelare och betyg</Text>
+      <style>
+        {`
+          .camp-header-0 { background-color: #f0f8ff; } /* AliceBlue for Läger 1 */
+          .camp-header-1 { background-color: #f5f5dc; } /* Beige for Läger 2 */
+          .camp-header-2 { background-color: #fffacd; } /* LemonChiffon for Läger 3 */
+          .camp-header-3 { background-color: #fafad2; } /* LightGoldenrodYellow for Läger 4 */
+          .camp-header-4 { background-color: #f0fff0; } /* Honeydew for Läger 5 */
+        `}
+      </style>
       <div className="ag-theme-quartz" style={{ height: 650, width: '100%' }}>
         <AgGridReact
           rowData={rowData}
           columnDefs={columnDefs}
           pagination={true}
           paginationPageSize={50}
-          onCellValueChanged={onCellValueChanged}
           getRowStyle={getRowStyle}
           stopEditingWhenCellsLoseFocus={true}
         />
@@ -298,6 +319,7 @@ const PlayerList = () => {
           <ModalHeader>Betyg Förklaringar</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
+            <Text mb="4">Ange betyg för varje läger och kategori A-F, där A är högsta betyget. Allt sparas automatiskt i Azure Cosmos DB.</Text>
             {renderCategoryInfo('Bollkontroll', 'Spelarens teknik med boll, förmåga att hantera press, dribbla med båda händer, samt kontroll under matchtempo. Bedömning grundas på bollsäkerhet, rytm och kreativitet i spelet.')}
             {renderCategoryInfo('Försvar', 'Individens förmåga att hålla sin spelare, förstå rotationsprinciper, sätta press, hjälpa laget och visa fysisk samt mental närvaro i försvarsspelet.')}
             {renderCategoryInfo('Anfall', 'Hur spelaren rör sig utan boll, beslutsfattande i 1v1, avslutsförmåga, spelförståelse i passningar och tempo, samt helhet i anfallsspelet.')}
