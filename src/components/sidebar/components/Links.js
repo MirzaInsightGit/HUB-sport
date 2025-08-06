@@ -46,6 +46,100 @@ export function SidebarLinks(props) {
             {createLinks(route.items)}
           </>
         );
+      } else if (route.collapse) {
+        return (
+          <Box key={index}>
+            <NavLink to={route.layout + route.path}>
+              <HStack
+                spacing={
+                  activeRoute(route.path.toLowerCase()) ? "22px" : "26px"
+                }
+                py='5px'
+                ps='10px'>
+                <Flex w='100%' alignItems='center' justifyContent='center'>
+                  <Box
+                    color={
+                      activeRoute(route.path.toLowerCase())
+                        ? activeIcon
+                        : textColor
+                    }
+                    me='18px'>
+                    {route.icon}
+                  </Box>
+                  <Text
+                    me='auto'
+                    color={
+                      activeRoute(route.path.toLowerCase())
+                        ? activeColor
+                        : textColor
+                    }
+                    fontWeight={
+                      activeRoute(route.path.toLowerCase())
+                        ? "bold"
+                        : "normal"
+                    }>
+                    {route.name}
+                  </Text>
+                </Flex>
+                <Box
+                  h='36px'
+                  w='4px'
+                  bg={
+                    activeRoute(route.path.toLowerCase())
+                      ? brandColor
+                      : "transparent"
+                  }
+                  borderRadius='5px'
+                />
+              </HStack>
+            </NavLink>
+            {route.items.map((item, subIndex) => (
+              <NavLink key={subIndex} to={item.layout + item.path}>
+                <HStack
+                  spacing={
+                    activeRoute(item.path.toLowerCase()) ? "22px" : "26px"
+                  }
+                  py='5px'
+                  ps='28px'>
+                  {item.icon && (
+                    <Box
+                      color={
+                        activeRoute(item.path.toLowerCase())
+                          ? activeIcon
+                          : textColor
+                      }
+                      me='18px'>
+                      {item.icon}
+                    </Box>
+                  )}
+                  <Text
+                    fontSize="sm"
+                    me='auto'
+                    color={
+                      activeRoute(item.path.toLowerCase())
+                        ? activeColor
+                        : inactiveColor
+                    }
+                    fontWeight={
+                      activeRoute(item.path.toLowerCase()) ? "bold" : "normal"
+                    }>
+                    {item.name}
+                  </Text>
+                  <Box
+                    h='36px'
+                    w='4px'
+                    bg={
+                      activeRoute(item.path.toLowerCase())
+                        ? brandColor
+                        : "transparent"
+                    }
+                    borderRadius='5px'
+                  />
+                </HStack>
+              </NavLink>
+            ))}
+          </Box>
+        );
       } else if (
         route.layout === "/admin" ||
         route.layout === "/auth" ||
@@ -118,7 +212,16 @@ export function SidebarLinks(props) {
                     }>
                     {route.name}
                   </Text>
-                  <Box h='36px' w='4px' bg='brand.400' borderRadius='5px' />
+                  <Box
+                    h='36px'
+                    w='4px'
+                    bg={
+                      activeRoute(route.path.toLowerCase())
+                        ? brandColor
+                        : "transparent"
+                    }
+                    borderRadius='5px'
+                  />
                 </HStack>
               </Box>
             )}

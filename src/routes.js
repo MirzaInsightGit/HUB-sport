@@ -2,7 +2,6 @@ import React from 'react';
 
 import { Icon } from '@chakra-ui/react';
 import {
-  MdBarChart,
   MdPerson,
   MdHome,
   MdLock,
@@ -16,14 +15,13 @@ import {
 import MainDashboard from 'views/admin/default';
 import NFTMarketplace from 'views/admin/marketplace';
 import Profile from 'views/admin/profile';
-import DataTables from 'views/admin/dataTables';
+import StatistikDistrikt from 'views/admin/statistik';
 import RTL from 'views/admin/rtl';
 import Tournaments from 'views/admin/Tournaments';
 import TournamentDetails from 'views/admin/TournamentDetails';
 import Seasons from 'views/admin/Seasons';
-import Chat from "components/Chat"; // Importera
+import Chat from "components/Chat";
 
-// Auth Imports
 import SignInCentered from 'views/auth/signIn';
 
 const routes = [
@@ -43,11 +41,11 @@ const routes = [
     secondary: true,
   },
   {
-    name: 'Data Tables',
+    name: 'Statistik - Distrikt',
     layout: '/admin',
-    icon: <Icon as={MdBarChart} width="20px" height="20px" color="inherit" />,
-    path: '/data-tables',
-    component: <DataTables />,
+    path: '/statistik-distrikt',
+    icon: <Icon as={MdTimeline} width="20px" height="20px" color="inherit" />,
+    component: <StatistikDistrikt />,
   },
   {
     name: 'Profile',
