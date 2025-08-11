@@ -20,6 +20,7 @@ import RTL from 'views/admin/rtl';
 import Tournaments from 'views/admin/Tournaments';
 import TournamentDetails from 'views/admin/TournamentDetails';
 import Seasons from 'views/admin/Seasons';
+import MatchDetails from 'views/admin/MatchDetails';
 import Chat from "components/Chat";
 
 import SignInCentered from 'views/auth/signIn';
@@ -77,6 +78,7 @@ const routes = [
     path: '/tournaments',
     icon: <Icon as={MdSportsBasketball} width="20px" height="20px" color="inherit" />,
     component: <Tournaments />,
+    hidden: true,
   },
   {
     name: 'Tournament Details',
@@ -91,6 +93,13 @@ const routes = [
     path: '/seasons',
     icon: <Icon as={MdTimeline} width="20px" height="20px" color="inherit" />,
     component: <Seasons />,
+  },
+  {
+  name: 'Match Details',
+  layout: '/admin',
+  path: '/matches/:tournamentId/:matchId',
+  component: <MatchDetails />,
+  hidden: true,
   },
   {
     name: "Chat - Internal",

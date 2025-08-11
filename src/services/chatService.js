@@ -1,4 +1,3 @@
-// src/services/chatService.js (full)
 import { io } from 'socket.io-client';
 
 const backendUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:8080' : 'https://hub.mirzamuhic.com';
@@ -6,7 +5,8 @@ const backendUrl = process.env.NODE_ENV === 'development' ? 'http://localhost:80
 const socket = io(backendUrl, {
   auth: {
     token: localStorage.getItem('id_token')
-  }
+  },
+  transports: ['websocket']
 });
 
 export const sendMessage = (groupId, message) => {
@@ -26,16 +26,19 @@ export const joinGroup = (groupId) => {
 };
 
 export const fetchUsers = async () => {
-  const token = localStorage.getItem('access_token');
+  const token = localStorage.getItem('id_token');
   const res = await fetch(`${backendUrl}/api/users`, { 
     headers: { Authorization: `Bearer ${token}` } 
   });
-  if (!res.ok) throw new Error('Failed to fetch users');
+  if (!res.ok) {
+    const errorData = await res.json();
+    throw new Error(JSON.stringify(errorData) || 'Failed to fetch users');
+  }
   return res.json();
 };
 
 export const createGroup = async (name, members) => {
-  const token = localStorage.getItem('access_token');
+  const token = localStorage.getItem('id_token');
   const res = await fetch(`${backendUrl}/api/groups`, { 
     method: 'POST', 
     headers: { 
@@ -44,15 +47,21 @@ export const createGroup = async (name, members) => {
     }, 
     body: JSON.stringify({ name, members }) 
   });
-  if (!res.ok) throw new Error('Failed to create group');
+  if (!res.ok) {
+    const errorData = await res.json();
+    throw new Error(JSON.stringify(errorData) || 'Failed to create group');
+  }
   return res.json();
 };
 
 export const fetchGroups = async () => {
-  const token = localStorage.getItem('access_token');
+  const token = localStorage.getItem('id_token');
   const res = await fetch(`${backendUrl}/api/groups`, { 
     headers: { Authorization: `Bearer ${token}` } 
   });
-  if (!res.ok) throw new Error('Failed to fetch groups');
+  if (!res.ok) {
+    const errorData = await res.json();
+    throw new Error(JSON.stringify(errorData) || 'Failed to fetch groups');
+  }
   return res.json();
 };

@@ -135,7 +135,7 @@ const LatestRegistrations = () => {
   return (
     <Card>
       <CardHeader>
-        <Text fontSize="xl" fontWeight="bold" color="black">Senaste Registreringar</Text>
+        <Text fontSize="xl" fontWeight="bold" color="black">Nya ordrar i shop</Text>
       </CardHeader>
       <CardBody>
         <Table variant="simple">

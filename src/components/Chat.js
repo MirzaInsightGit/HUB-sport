@@ -1,4 +1,3 @@
-// src/components/Chat.js (full)
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Flex, Input, Button, Text, VStack, Avatar, useColorModeValue, Popover, PopoverTrigger, PopoverContent, IconButton, Badge, Divider, Tabs, TabList, TabPanels, TabPanel, Tab, Select, List, ListItem } from '@chakra-ui/react';
 import { FaCommentDots } from 'react-icons/fa';
@@ -14,8 +13,8 @@ const Chat = () => {
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupMembers, setNewGroupMembers] = useState([]);
   const messagesEndRef = useRef(null);
+  const selectedGroupRef = useRef(null);
 
-  const bg = useColorModeValue('white', 'gray.800');
   const inputBg = useColorModeValue('gray.100', 'gray.700');
   const bubbleBgMe = 'blue.500';
   const bubbleBgOther = 'gray.300';
@@ -25,15 +24,20 @@ const Chat = () => {
   useEffect(() => {
     fetchUsers().then(setUsers).catch(console.error);
     fetchGroups().then(setGroups).catch(console.error);
-    onReceiveMessage((data) => {
-      if (data.groupId === selectedGroup) {
+    const messageListener = (data) => {
+      if (data.groupId === selectedGroupRef.current) {
         setMessages((prev) => [...prev, data]);
       }
-    });
+    };
+    onReceiveMessage(messageListener);
     onOnlineUsers((users) => setOnlineUsers(users));
+    return () => {
+      // Cleanup if needed, but socket.off not exposed, assume handled in service
+    };
   }, []);
 
   useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
     if (selectedGroup) {
       joinGroup(selectedGroup);
       const group = groups.find(g => g.id === selectedGroup);
