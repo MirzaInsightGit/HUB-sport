@@ -1,49 +1,234 @@
-import React, { useMemo, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams } from "react-router-dom";
 import {
-  Box, Heading, Text, Badge, Tabs, TabList, TabPanels, Tab, TabPanel,
-  Table, Thead, Tbody, Tr, Th, Td, Spinner, Button, HStack
-} from '@chakra-ui/react';
-import { useProfixioTournamentMatches, useProfixioTournamentTeams } from '../../hooks/useProfixio';
+  Box,
+  Heading,
+  Text,
+  Badge,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
+  Spinner,
+  Button,
+  HStack,
+  SimpleGrid,
+  Card,
+  CardHeader,
+  CardBody,
+  CardFooter,
+  Stack,
+  StackDivider,
+  Grid,
+  GridItem,
+  Avatar,
+  Tag,
+  TagLabel,
+  Divider,
+} from "@chakra-ui/react";
+import {
+  useProfixioTournamentMatches,
+  useProfixioTournamentTeams,
+} from "../../hooks/useProfixio";
+import { getMatchEvents, getMatchLineup } from "../../api/profixioApi";
+import useAuth from "../../hooks/useAuth";
+
+// --- helpers -------------------------------------------------------------
 
 const normalizeMatches = (raw) => {
-  const list = Array.isArray(raw) ? raw : (raw?.data || []);
+  const list = Array.isArray(raw) ? raw : raw?.data || [];
   return list.map((m) => ({
     id: m?.id ?? m?.matchId ?? m?.code,
-    home: m?.homeTeamName ?? m?.homeTeam ?? m?.home ?? '-',
-    away: m?.awayTeamName ?? m?.awayTeam ?? m?.away ?? '-',
-    result: m?.result ?? (m?.homeScore != null && m?.awayScore != null ? `${m.homeScore}-${m.awayScore}` : '-'),
+    home:
+      m?.homeTeamName ?? m?.homeTeam ?? m?.home?.name ?? m?.home ?? "—",
+    away:
+      m?.awayTeamName ?? m?.awayTeam ?? m?.away?.name ?? m?.away ?? "—",
+    result:
+      m?.result ??
+      (m?.homeScore != null && m?.awayScore != null
+        ? `${m.homeScore}-${m.awayScore}`
+        : "—"),
     date: m?.start ?? m?.date ?? m?.startDate ?? null,
-    status: m?.status || undefined,
   }));
 };
 
 const normalizeTeams = (raw) => {
-  const list = Array.isArray(raw) ? raw : (raw?.data || []);
+  const list = Array.isArray(raw) ? raw : raw?.data || [];
   return list.map((t) => ({
     id: t?.id ?? t?.teamId ?? t?.code,
-    name: t?.name ?? t?.teamName ?? '-',
+    name: t?.name ?? t?.teamName ?? "—",
     seed: t?.seed ?? t?.seeding ?? null,
     players: Array.isArray(t?.players) ? t.players : [],
   }));
 };
 
+// Try to extract points from a generic event
+const getPointsFromEvent = (ev) => {
+  if (!ev) return 0;
+  if (typeof ev.points === "number") return ev.points;
+  if (typeof ev.value === "number") return ev.value;
+  if (typeof ev.score === "number") return ev.score;
+  const type = (ev.type || ev.eventType || ev.code || "")
+    .toString()
+    .toLowerCase();
+  if (type.includes("3pt") || type.includes("3-po") || type.includes("trepo"))
+    return 3;
+  if (type.includes("2pt") || type.includes("2-po")) return 2;
+  if (type.includes("1pt") || type.includes("ft") || type.includes("straff"))
+    return 1;
+  return 0;
+};
+
+// --- component -----------------------------------------------------------
+
 export default function TournamentDetails() {
   const { tournamentId } = useParams();
+  const { user } = useAuth();
+
+  // pagination for matches
   const [page, setPage] = useState(1);
   const limit = 15;
 
-  const { data: rawMatches, loading: mLoading } = useProfixioTournamentMatches(tournamentId, { page, limit });
-  const { data: rawTeams, loading: tLoading } = useProfixioTournamentTeams(tournamentId, { players: 1 });
+  const { data: rawMatches, loading: mLoading } =
+    useProfixioTournamentMatches(tournamentId, { page, limit });
+  const { data: rawTeams, loading: tLoading } =
+    useProfixioTournamentTeams(tournamentId, { players: 1 });
 
   const matches = useMemo(() => normalizeMatches(rawMatches), [rawMatches]);
   const teams = useMemo(() => normalizeTeams(rawTeams), [rawTeams]);
 
-  const meta = rawMatches?.meta || { current_page: page, last_page: page, total: matches.length };
+  const meta =
+    rawMatches?.meta || {
+      current_page: page,
+      last_page: page,
+      total: matches.length,
+    };
   const loading = mLoading || tLoading;
 
   const canPrev = (meta?.current_page || 1) > 1;
   const canNext = (meta?.current_page || 1) < (meta?.last_page || 1);
+
+  // Selected match
+  const [selectedId, setSelectedId] = useState(null);
+  const selected = useMemo(
+    () =>
+      matches.find(
+        (m) => m.id?.toString() === selectedId?.toString()
+      ) || matches[0],
+    [matches, selectedId]
+  );
+
+  // Top scorers (home/away)
+  const [topScorers, setTopScorers] = useState({ home: null, away: null });
+  const [fetchingScorers, setFetchingScorers] = useState(false);
+
+  // Quick lookup: team name -> players[]
+  const teamPlayersByName = useMemo(() => {
+    const map = new Map();
+    teams.forEach((t) => map.set(t.name, t.players || []));
+    return map;
+  }, [teams]);
+
+  useEffect(() => {
+    if (!user?.idToken || !tournamentId || !selected?.id) return;
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setFetchingScorers(true);
+
+        const [lineupRes, eventsRes] = await Promise.all([
+          getMatchLineup(tournamentId, selected.id, user.idToken),
+          getMatchEvents(tournamentId, selected.id, user.idToken),
+        ]);
+
+        const lineupList = Array.isArray(lineupRes?.data)
+          ? lineupRes.data
+          : lineupRes || [];
+        const playerMeta = new Map();
+        lineupList.forEach((p) => {
+          const id =
+            p?.id || p?.playerId || p?.globalPlayerId || p?.number;
+          const name = p?.name || p?.fullName || p?.displayName;
+          const side = (p?.teamSide || p?.side || "")
+            .toString()
+            .toLowerCase()
+            .includes("away")
+            ? "away"
+            : "home";
+          if (id != null) playerMeta.set(id.toString(), { name, side });
+        });
+
+        const events = Array.isArray(eventsRes?.data)
+          ? eventsRes.data
+          : eventsRes || [];
+        const tally = new Map();
+        events.forEach((ev) => {
+          const pts = getPointsFromEvent(ev);
+          if (!pts) return;
+          const pid = ev.playerId || ev.player || ev.globalPlayerId || ev.personId;
+          if (pid == null) return;
+          const key = pid.toString();
+          tally.set(key, (tally.get(key) || 0) + pts);
+        });
+
+        const pickTop = (side) => {
+          let top = { name: "Okänd spelare", points: 0 };
+
+          playerMeta.forEach((meta, pid) => {
+            if (meta.side !== side) return;
+            const pts = tally.get(pid) || 0;
+            if (pts > top.points) top = { name: meta.name || "Okänd spelare", points: pts };
+          });
+
+          if (top.points === 0) {
+            const roster =
+              teamPlayersByName.get(side === "home" ? selected?.home : selected?.away) ||
+              [];
+            roster.forEach((p) => {
+              const pid = p?.id || p?.playerId || p?.globalPlayerId;
+              const pts = pid != null ? tally.get(pid?.toString()) || 0 : 0;
+              const nm = p?.name || p?.fullName || "Okänd spelare";
+              if (pts > top.points) top = { name: nm, points: pts };
+            });
+          }
+
+          return top;
+        };
+
+        const result = { home: pickTop("home"), away: pickTop("away") };
+        if (!cancelled) setTopScorers(result);
+      } catch (e) {
+        if (!cancelled) setTopScorers({ home: null, away: null });
+      } finally {
+        if (!cancelled) setFetchingScorers(false);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    user?.idToken,
+    tournamentId,
+    selected?.id,
+    selected?.home,
+    selected?.away,
+    teamPlayersByName,
+  ]);
+
+  // Ensure we always have a selected card
+  useEffect(() => {
+    if (
+      matches.length &&
+      (selectedId == null ||
+        !matches.find((m) => m.id?.toString() === selectedId?.toString()))
+    ) {
+      setSelectedId(matches[0].id);
+    }
+  }, [matches, selectedId]);
 
   if (loading) {
     return (
@@ -55,15 +240,24 @@ export default function TournamentDetails() {
 
   return (
     <Box p={5}>
-      <Box display="flex" alignItems="baseline" justifyContent="space-between" mb={4}>
-        <Heading as="h1" size="lg">Turnering {tournamentId}</Heading>
-        <Badge variant="subtle" colorScheme="purple">ID: {tournamentId}</Badge>
+      <Box
+        display="flex"
+        alignItems="baseline"
+        justifyContent="space-between"
+        mb={4}
+      >
+        <Heading as="h1" size="lg">
+          Turnering {tournamentId}
+        </Heading>
+        <Badge variant="subtle" colorScheme="purple">
+          ID: {tournamentId}
+        </Badge>
       </Box>
 
       <Tabs colorScheme="purple" variant="enclosed">
         <TabList>
           <Tab>Matcher</Tab>
-          <Tab>Lag & spelare</Tab>
+          <Tab>Lag &amp; spelare</Tab>
         </TabList>
         <TabPanels>
           <TabPanel>
@@ -72,36 +266,174 @@ export default function TournamentDetails() {
             ) : (
               <>
                 <HStack justify="space-between" mb={3}>
-                  <Text>Totalt: {meta?.total ?? matches.length} • Sida {meta?.current_page ?? page} av {meta?.last_page ?? 1}</Text>
+                  <Text>
+                    Totalt: {meta?.total ?? matches.length} • Sida{" "}
+                    {meta?.current_page ?? page} av {meta?.last_page ?? 1}
+                  </Text>
                   <HStack>
-                    <Button size="sm" onClick={() => setPage(1)} isDisabled={!canPrev}>« Första</Button>
-                    <Button size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} isDisabled={!canPrev}>‹ Föregående</Button>
-                    <Button size="sm" onClick={() => setPage(p => p + 1)} isDisabled={!canNext}>Nästa ›</Button>
-                    <Button size="sm" onClick={() => setPage(meta?.last_page || page)} isDisabled={!canNext}>Sista »</Button>
+                    <Button
+                      size="sm"
+                      onClick={() => setPage(1)}
+                      isDisabled={!canPrev}
+                    >
+                      « Första
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      isDisabled={!canPrev}
+                    >
+                      ‹ Föregående
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => setPage((p) => p + 1)}
+                      isDisabled={!canNext}
+                    >
+                      Nästa ›
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => setPage(meta?.last_page || page)}
+                      isDisabled={!canNext}
+                    >
+                      Sista »
+                    </Button>
                   </HStack>
                 </HStack>
-                <Table variant="simple" size="sm">
-                  <Thead>
-                    <Tr>
-                      <Th>Match ID</Th>
-                      <Th>Hemmalag</Th>
-                      <Th>Bortalag</Th>
-                      <Th>Resultat</Th>
-                      <Th>Datum</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {matches.map((m) => (
-                      <Tr key={m.id}>
-                        <Td>{m.id}</Td>
-                        <Td>{m.home}</Td>
-                        <Td>{m.away}</Td>
-                        <Td>{m.result}</Td>
-                        <Td>{m.date ? new Date(m.date).toLocaleString() : '-'}</Td>
-                      </Tr>
-                    ))}
-                  </Tbody>
-                </Table>
+
+                {/* NBA-style: left = top scorers, right = match cards grid */}
+                <Grid
+                  templateColumns={{ base: "1fr", lg: "360px 1fr" }}
+                  gap={6}
+                  alignItems="start"
+                >
+                  <GridItem>
+                    <Card variant="outline" borderRadius="lg">
+                      <CardHeader>
+                        <Heading as="h3" size="md">
+                          Toppscorer – vald match
+                        </Heading>
+                        <Text mt={1} opacity={0.8}>
+                          {selected?.home} vs {selected?.away}{" "}
+                          {selected?.result && `• ${selected.result}`}
+                        </Text>
+                      </CardHeader>
+                      <Divider />
+                      <CardBody>
+                        <Stack spacing={4} divider={<StackDivider />}>
+                          <Box>
+                            <Text fontSize="sm" opacity={0.7} mb={1}>
+                              Hemmalag
+                            </Text>
+                            {fetchingScorers ? (
+                              <HStack>
+                                <Spinner size="sm" />
+                                <Text>Laddar poäng…</Text>
+                              </HStack>
+                            ) : topScorers.home ? (
+                              <HStack>
+                                <Avatar
+                                  name={topScorers.home.name}
+                                  size="sm"
+                                />
+                                <Text fontWeight="semibold">
+                                  {topScorers.home.name}
+                                </Text>
+                                <Tag size="sm" colorScheme="purple">
+                                  <TagLabel>{topScorers.home.points} p</TagLabel>
+                                </Tag>
+                              </HStack>
+                            ) : (
+                              <Text>Ingen poängdata.</Text>
+                            )}
+                          </Box>
+                          <Box>
+                            <Text fontSize="sm" opacity={0.7} mb={1}>
+                              Bortalag
+                            </Text>
+                            {fetchingScorers ? (
+                              <HStack>
+                                <Spinner size="sm" />
+                                <Text>Laddar poäng…</Text>
+                              </HStack>
+                            ) : topScorers.away ? (
+                              <HStack>
+                                <Avatar
+                                  name={topScorers.away.name}
+                                  size="sm"
+                                />
+                                <Text fontWeight="semibold">
+                                  {topScorers.away.name}
+                                </Text>
+                                <Tag size="sm" colorScheme="purple">
+                                  <TagLabel>{topScorers.away.points} p</TagLabel>
+                                </Tag>
+                              </HStack>
+                            ) : (
+                              <Text>Ingen poängdata.</Text>
+                            )}
+                          </Box>
+                        </Stack>
+                      </CardBody>
+                      <CardFooter>
+                        <Text fontSize="xs" opacity={0.6}>
+                          Visar högst noterad poäng per lag (beräknad från
+                          matchhändelser).
+                        </Text>
+                      </CardFooter>
+                    </Card>
+                  </GridItem>
+
+                  <GridItem>
+                    <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={4}>
+                      {matches.map((m) => {
+                        const isActive =
+                          selected?.id?.toString() === m.id?.toString();
+                        return (
+                          <Card
+                            key={m.id}
+                            variant={isActive ? "filled" : "outline"}
+                            borderRadius="lg"
+                            cursor="pointer"
+                            onClick={() => setSelectedId(m.id)}
+                          >
+                            <CardHeader pb={2}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="semibold">{m.home}</Text>
+                                <Text opacity={0.7}>vs</Text>
+                                <Text
+                                  fontWeight="semibold"
+                                  textAlign="right"
+                                >
+                                  {m.away}
+                                </Text>
+                              </HStack>
+                            </CardHeader>
+                            <CardBody pt={0}>
+                              <HStack justify="space-between">
+                                <Tag size="sm" colorScheme="gray">
+                                  ID {m.id}
+                                </Tag>
+                                <Tag
+                                  size="sm"
+                                  colorScheme={
+                                    m.result !== "—" ? "purple" : "gray"
+                                  }
+                                >
+                                  {m.result || "—"}
+                                </Tag>
+                              </HStack>
+                              <Text mt={2} fontSize="sm" opacity={0.8}>
+                                {m.date ? new Date(m.date).toLocaleString() : ""}
+                              </Text>
+                            </CardBody>
+                          </Card>
+                        );
+                      })}
+                    </SimpleGrid>
+                  </GridItem>
+                </Grid>
               </>
             )}
           </TabPanel>
@@ -110,42 +442,49 @@ export default function TournamentDetails() {
             {teams.length === 0 ? (
               <Text>Inga lag hittades.</Text>
             ) : (
-              <Table variant="simple" size="sm">
-                <Thead>
-                  <Tr>
-                    <Th>Lag</Th>
-                    <Th>Seed</Th>
-                    <Th>Spelare</Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {teams.map((t) => (
-                    <Tr key={t.id}>
-                      <Td>{t.name}</Td>
-                      <Td>{t.seed ?? '-'}</Td>
-                      <Td>
-                        {t.players.length === 0 ? (
-                          <Text opacity={0.7}>Inga spelare listade</Text>
-                        ) : (
-                          <ul style={{ paddingLeft: 16, margin: 0 }}>
-                            {t.players.map((p) => (
-                              <li key={p?.id || p?.playerId || p?.name}>{p?.name || p?.fullName || 'Okänd spelare'}</li>
-                            ))}
-                          </ul>
+              <Box>
+                {teams.map((t) => (
+                  <Card key={t.id} variant="outline" borderRadius="lg" mb={3}>
+                    <CardHeader>
+                      <HStack justify="space-between">
+                        <Heading as="h4" size="sm">
+                          {t.name}
+                        </Heading>
+                        {t.seed != null && (
+                          <Tag size="sm" colorScheme="purple">
+                            Seed {t.seed}
+                          </Tag>
                         )}
-                      </Td>
-                    </Tr>
-                  ))}
-                </Tbody>
-              </Table>
+                      </HStack>
+                    </CardHeader>
+                    <CardBody pt={0}>
+                      {t.players?.length ? (
+                        <Stack spacing={1}>
+                          {t.players.map((p) => (
+                            <HStack
+                              key={p?.id || p?.playerId || p?.name}
+                              justify="space-between"
+                            >
+                              <HStack>
+                                <Avatar name={p?.name || p?.fullName} size="xs" />
+                                <Text>
+                                  {p?.name || p?.fullName || "Okänd spelare"}
+                                </Text>
+                              </HStack>
+                            </HStack>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Text opacity={0.7}>Inga spelare listade</Text>
+                      )}
+                    </CardBody>
+                  </Card>
+                ))}
+              </Box>
             )}
           </TabPanel>
         </TabPanels>
       </Tabs>
-
-      <Box mt={6}>
-        <Link to="/admin/seasons">← Tillbaka till säsonger</Link>
-      </Box>
     </Box>
   );
 }
