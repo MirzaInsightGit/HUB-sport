@@ -1,28 +1,3 @@
-// src/views/admin/default/index.jsx
-
-/*!
-  _   _  ___  ____  ___ ________  _   _   _   _ ___   
- | | | |/ _ \|  _ \|_ _|__  / _ \| \ | | | | | |_ _| 
- | |_| | | | | |_) || |  / / | | |  \| | | | | || | 
- |  _  | |_| |  _ < | | / /| |_| | |\  | | |_| || |
- |_| |_|\___/|_| \_\___/____\___/|_| \_|  \___/|___|
-                                                                                                                                                                                                                                                                                                                                       
-=========================================================
-* Horizon UI - v1.1.0
-=========================================================
-
-* Product Page: https://www.horizon-ui.com/
-* Copyright 2023 Horizon UI[](https://www.horizon-ui.com/)
-
-* Designed and Coded by Simmmple
-
-=========================================================
-
-* The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-*/
-
-// Chakra imports
 import {
   Avatar,
   Box,
@@ -63,21 +38,22 @@ import {
 } from "views/admin/default/variables/columnsData";
 import tableDataComplex from "views/admin/default/variables/tableDataComplex.json";
 import axios from "axios";
+import { API_BASE } from "../../../config/apiBase";
 
 const SoldProducts = () => {
   const [products, setProducts] = useState([]);
 
   useEffect(() => {
     const fetchSoldProducts = async () => {
-      const url = `${process.env.REACT_APP_WC_URL}/wp-json/wc/v3/products?per_page=100`;
-      const response = await axios.get(url, {
-        auth: {
-          username: process.env.REACT_APP_WC_KEY,
-          password: process.env.REACT_APP_WC_SECRET,
-        },
-      });
-      const sold = response.data.filter((p) => p.total_sales > 0);
-      setProducts(sold);
+      try {
+        const url = `${API_BASE}/wc/products?per_page=100`;
+        const response = await axios.get(url);
+        const sold = (response.data || []).filter((p) => Number(p.total_sales) > 0);
+        setProducts(sold);
+      } catch (err) {
+        console.error('Failed to load sold products:', err);
+        setProducts([]);
+      }
     };
     fetchSoldProducts();
   }, []);
@@ -116,18 +92,15 @@ const LatestRegistrations = () => {
 
   useEffect(() => {
     const fetchOrders = async () => {
-      const wcUrl = process.env.REACT_APP_WC_URL;
-      const auth = {
-        auth: {
-          username: process.env.REACT_APP_WC_KEY,
-          password: process.env.REACT_APP_WC_SECRET,
-        },
-      };
-
-      // Hämtar de 10 senaste ordrarna från WooCommerce, sorterade efter datum (nyast först).
-      // Ingen kategori-filter, så alla ordrar visas.
-      const ordersResponse = await axios.get(`${wcUrl}/wp-json/wc/v3/orders?per_page=10&orderby=date&order=desc`, auth);
-      setOrders(ordersResponse.data);
+      try {
+        const ordersResponse = await axios.get(`${API_BASE}/wc/orders`, {
+          params: { per_page: 10, orderby: 'date', order: 'desc' }
+        });
+        setOrders(ordersResponse.data || []);
+      } catch (err) {
+        console.error('Failed to load latest registrations:', err);
+        setOrders([]);
+      }
     };
     fetchOrders();
   }, []);
@@ -185,64 +158,63 @@ export default function UserReports() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const wcUrl = process.env.REACT_APP_WC_URL;
-      const auth = {
-        auth: {
-          username: process.env.REACT_APP_WC_KEY,
-          password: process.env.REACT_APP_WC_SECRET,
-        },
-      };
+      try {
+        const today = new Date();
+        const firstDayMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+        const lastDayMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString();
+        const firstDayPrevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString();
+        const lastDayPrevMonth = new Date(today.getFullYear(), today.getMonth(), 0).toISOString();
 
-      const today = new Date();
-      const firstDayMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-      const lastDayMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString();
-      const firstDayPrevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString();
-      const lastDayPrevMonth = new Date(today.getFullYear(), today.getMonth(), 0).toISOString();
+        const ordersThisMonth = await axios.get(`${API_BASE}/wc/orders`, {
+          params: { status: 'completed', after: firstDayMonth, before: lastDayMonth, per_page: 100 }
+        });
+        const ordersThis = ordersThisMonth.data || [];
+        const salesThisMonth = ordersThis.reduce((acc, order) => acc + parseFloat(order.total || 0), 0);
+        const itemsThisMonth = ordersThis.reduce((acc, order) => acc + (order.line_items?.length || 0), 0);
+        const ordersCountThisMonth = ordersThis.length;
 
-      // Hämta ordrar denna månad
-      const ordersThisMonth = await axios.get(`${wcUrl}/wp-json/wc/v3/orders?status=completed&after=${firstDayMonth}&before=${lastDayMonth}&per_page=100`, auth);
-      const salesThisMonth = ordersThisMonth.data.reduce((acc, order) => acc + parseFloat(order.total), 0);
-      const itemsThisMonth = ordersThisMonth.data.reduce((acc, order) => acc + order.line_items.length, 0);
-      const ordersCountThisMonth = ordersThisMonth.data.length;
+        const ordersPrevMonth = await axios.get(`${API_BASE}/wc/orders`, {
+          params: { status: 'completed', after: firstDayPrevMonth, before: lastDayPrevMonth, per_page: 100 }
+        });
+        const ordersPrev = ordersPrevMonth.data || [];
+        const salesPrevMonth = ordersPrev.reduce((acc, order) => acc + parseFloat(order.total || 0), 0);
+        const growth = salesPrevMonth > 0 ? ((salesThisMonth - salesPrevMonth) / salesPrevMonth * 100).toFixed(2) : 0;
 
-      // Hämta ordrar förra månaden för growth
-      const ordersPrevMonth = await axios.get(`${wcUrl}/wp-json/wc/v3/orders?status=completed&after=${firstDayPrevMonth}&before=${lastDayPrevMonth}&per_page=100`, auth);
-      const salesPrevMonth = ordersPrevMonth.data.reduce((acc, order) => acc + parseFloat(order.total), 0);
-      const growth = salesPrevMonth > 0 ? ((salesThisMonth - salesPrevMonth) / salesPrevMonth * 100).toFixed(2) : 0;
+        setStats({
+          totalSales: salesThisMonth.toFixed(2),
+          netSales: salesThisMonth.toFixed(2),
+          itemsSold: itemsThisMonth,
+          ordersCount: ordersCountThisMonth,
+          growth,
+        });
 
-      setStats({
-        totalSales: salesThisMonth.toFixed(2),
-        netSales: salesThisMonth.toFixed(2), // Anta net = total för enkelhet
-        itemsSold: itemsThisMonth,
-        ordersCount: ordersCountThisMonth,
-        growth,
-      });
+        const dailySales = {};
+        ordersThis.forEach(order => {
+          const date = (order.date_created || '').split('T')[0];
+          if (!date) return;
+          dailySales[date] = (dailySales[date] || 0) + parseFloat(order.total || 0);
+        });
+        const monthly = Object.keys(dailySales).map(date => ({ date, amount: dailySales[date] }));
+        setMonthlyData(monthly.sort((a, b) => new Date(a.date) - new Date(b.date)));
 
-      // Månadsdata för graf (daglig)
-      const dailySales = {};
-      ordersThisMonth.data.forEach(order => {
-        const date = order.date_created.split('T')[0];
-        dailySales[date] = (dailySales[date] || 0) + parseFloat(order.total);
-      });
-      const monthly = Object.keys(dailySales).map(date => ({ date, amount: dailySales[date] }));
-      setMonthlyData(monthly.sort((a, b) => new Date(a.date) - new Date(b.date)));
-
-      // Veckodata för graf (daglig denna vecka, med 0 för tomma dagar)
-      const firstDayWeek = new Date(today);
-      firstDayWeek.setDate(today.getDate() - today.getDay() + 1); // Måndag
-      const weeklySales = {};
-      for (let i = 0; i < 7; i++) {
-        const day = new Date(firstDayWeek);
-        day.setDate(firstDayWeek.getDate() + i);
-        const dayStr = day.getDate();
-        weeklySales[dayStr] = 0;
+        const firstDayWeek = new Date(today);
+        firstDayWeek.setDate(today.getDate() - today.getDay() + 1); // Monday
+        const weeklySales = {};
+        for (let i = 0; i < 7; i++) {
+          const day = new Date(firstDayWeek);
+          day.setDate(firstDayWeek.getDate() + i);
+          weeklySales[day.getDate()] = 0;
+        }
+        ordersThis.filter(order => new Date(order.date_created) >= firstDayWeek).forEach(order => {
+          const day = new Date(order.date_created).getDate();
+          weeklySales[day] = (weeklySales[day] || 0) + parseFloat(order.total || 0);
+        });
+        const weekly = Object.keys(weeklySales).map(day => ({ day: parseInt(day), amount: weeklySales[day] }));
+        setWeeklyData(weekly.sort((a, b) => a.day - b.day));
+      } catch (err) {
+        console.error('Failed to load dashboard stats:', err);
+        // Leave previous state; optionally set fallbacks here if desired
       }
-      ordersThisMonth.data.filter(order => new Date(order.date_created) >= firstDayWeek).forEach(order => {
-        const day = new Date(order.date_created).getDate();
-        weeklySales[day] = (weeklySales[day] || 0) + parseFloat(order.total);
-      });
-      const weekly = Object.keys(weeklySales).map(day => ({ day: parseInt(day), amount: weeklySales[day] }));
-      setWeeklyData(weekly.sort((a, b) => a.day - b.day));
     };
     fetchData();
   }, []);

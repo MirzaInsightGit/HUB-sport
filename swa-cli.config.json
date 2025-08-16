@@ -3,6 +3,8 @@
     "hub-sport": {
       "appLocation": ".",
       "outputLocation": "build",
+      "apiLocation": "../stockholmbasket-api",
       "appBuildCommand": "npm run build -- --no-undef"
     }
   }
+}

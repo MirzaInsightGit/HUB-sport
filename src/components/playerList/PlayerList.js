@@ -6,6 +6,7 @@ import axios from 'axios';
 import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Box, useDisclosure } from "@chakra-ui/react";
 import { CosmosClient } from '@azure/cosmos';
 import { useMsal } from "@azure/msal-react";
+import { API_BASE } from '../../config/apiBase';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -24,127 +25,131 @@ const campProducts = {
 const PlayerList = () => {
   const [rowData, setRowData] = useState([]);
   const textColor = useColorModeValue("navy.700", "white");
-  const { accounts } = useMsal();
+  const { instance, accounts } = useMsal();
   const currentUser = accounts[0] ? accounts[0].name : 'Unknown';
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const [favorites, setFavorites] = useState(new Set());
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const gridRef = useRef();
 
   const container = useMemo(() => {
-    const cosmosClient = new CosmosClient({
-      endpoint: process.env.REACT_APP_COSMOS_ENDPOINT,
-      key: process.env.REACT_APP_COSMOS_KEY
-    });
-    const database = cosmosClient.database('HUBSportDB');
-    return database.container('Players');
+    const endpoint = process.env.REACT_APP_COSMOS_ENDPOINT;
+    const key = process.env.REACT_APP_COSMOS_KEY;
+    if (!endpoint || !key) {
+      console.warn('Cosmos env missing in frontend; skipping Cosmos in PlayerList');
+      return null;
+    }
+    const cosmosClient = new CosmosClient({ endpoint, key });
+    return cosmosClient.database('HUBSportDB').container('Players');
   }, []);
 
+  // ---- Load players + favorites -------------------------------------------------
   const fetchPlayers = useCallback(async () => {
-    const baseUrl = process.env.REACT_APP_WC_URL;
-    if (!baseUrl) {
-      console.error('REACT_APP_WC_URL is not defined in .env');
-      return;
-    }
     try {
-      const response = await axios.get(`${baseUrl}/wp-json/wc/v3/orders`, {
-        params: { status: 'completed', per_page: 100 },
-        auth: {
-          username: process.env.REACT_APP_WC_KEY,
-          password: process.env.REACT_APP_WC_SECRET
-        }
-      });
-      console.log('Orders fetched:', response.data.length);
-      const playersMap = new Map();
-      response.data.forEach(order => {
-        const purchasedCamps = [];
-        order.line_items.forEach(item => {
-          const campIndex = Object.entries(campProducts).find(([key, val]) => val === item.product_id)?.[0];
-          if (campIndex !== undefined) {
-            purchasedCamps.push(parseInt(campIndex));
-          }
-        });
-        if (purchasedCamps.length > 0) {
-          const email = order.billing.email;
-          if (email) {
-            if (!playersMap.has(email)) {
-              const getMeta = (key) => order.meta_data.find(m => m.key === key)?.value || '';
-              playersMap.set(email, {
-                id: email,
-                name: `${order.billing.first_name} ${order.billing.last_name}`,
-                email,
-                phone: order.billing.phone || '',
-                address: `${order.billing.address_1}, ${order.billing.city}` || '',
-                spelarnamn: getMeta('dlt_spelarnamn'),
-                kon: getMeta('dlt_kon'),
-                mobilnummer: getMeta('dlt_mobilnummer'),
-                spelarmejl: getMeta('dlt_spelarmejl'),
-                klubblag: getMeta('dlt_klubblag'),
-                basket_position: getMeta('dlt_basket_position'),
-                aktuellserie: getMeta('dlt_aktuellserie'),
-                alderspelare: getMeta('dlt_alderspelare'),
-                registeredCamps: camps.map(() => false)
-              });
-            }
-            purchasedCamps.forEach(campIndex => {
-              playersMap.get(email).registeredCamps[campIndex] = true;
-            });
-          }
-        }
-      });
-      const players = Array.from(playersMap.values());
-      for (let player of players) {
+      // Backend ger redan ihopslagna spelare (Woo + Cosmos ratings)
+      const { data } = await axios.get(`${API_BASE}/district/players`);
+      const players = data?.players || [];
+
+      // Hämta coachens favoriter
+      let favSet = new Set();
+      try {
+        const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
+        const scopes = apiScopeStr
+          ? apiScopeStr.split(',').map((s) => s.trim()).filter(Boolean)
+          : [`api://${process.env.REACT_APP_API_CLIENT_ID}/.default`];
+
+        let headers = {};
         try {
-          const { resources } = await container.items.query({
-            query: "SELECT * FROM c WHERE c.id = @id",
-            parameters: [{ name: "@id", value: player.id }]
-          }).fetchAll();
-          if (resources.length > 0) {
-            const resource = resources[0];
-            let ratings = resource.ratings || camps.map(() => ({}));
-            if (!Array.isArray(ratings) || ratings.length !== camps.length) {
-              ratings = camps.map(() => ({}));
-              if (Array.isArray(resource.rating)) {
-                ratings[0] = resource.rating[resource.rating.length - 1] || {};
-              } else if (resource.rating && typeof resource.rating === 'object') {
-                ratings[0] = resource.rating;
-              }
-            }
-            let comments = resource.comments || camps.map(() => ({ value: '', by: '', timestamp: '' }));
-            if (!Array.isArray(comments) || comments.length !== camps.length) {
-              comments = camps.map(() => ({ value: '', by: '', timestamp: '' }));
-              if (typeof resource.comments === 'string') {
-                comments[0] = { value: resource.comments, by: '', timestamp: '' };
-              } else if (resource.comments && typeof resource.comments === 'object') {
-                comments[0] = { value: resource.comments.value || '', by: resource.comments.by || '', timestamp: resource.comments.timestamp || '' };
-              }
-            }
-            player.ratings = ratings;
-            player.comments = comments;
-            console.log('Loaded data for player', player.id, resource);
-          } else {
-            const item = {
-              id: player.id,
-              ratings: camps.map(() => ({})),
-              comments: camps.map(() => ({ value: '', by: '', timestamp: '' }))
-            };
-            await container.items.upsert(item, { partitionKey: player.id });
-            console.log('Created new entry for player', player.id);
-          }
-        } catch (err) {
-          console.error('Error loading/creating for player', player.id, err);
-        }
+          const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
+          if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
+        } catch (_) { /* dev utan token */ }
+        headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+
+        const res = await fetch(`${API_BASE}/favorites`, { headers });
+        const favIds = await res.json();
+        favSet = new Set(Array.isArray(favIds) ? favIds : []);
+        setFavorites(favSet);
+      } catch (e) {
+        console.error('Error loading favorites:', e);
       }
-      setRowData(players);
+
+      // Normalisera rader så index-åtkomst aldrig spricker
+      const normalize = (p) => {
+        const regs = Array.isArray(p.registeredCamps) && p.registeredCamps.length === 5 ? p.registeredCamps : [false,false,false,false,false];
+        const ratings = Array.isArray(p.ratings) && p.ratings.length === 5 ? p.ratings : [{},{},{},{},{}];
+        const comments = Array.isArray(p.comments) && p.comments.length === 5
+          ? p.comments
+          : [ {}, {}, {}, {}, {} ].map(() => ({ value:'', by:'', timestamp:'' }));
+        const campAverages = Array.isArray(p.campAverages) && p.campAverages.length === 5 ? p.campAverages : [0,0,0,0,0];
+        return {
+          ...p,
+          registeredCamps: regs,
+          ratings,
+          comments,
+          campAverages,
+          spelarmejl: p.spelarmejl || '',
+          mobilnummer: p.mobilnummer || ''
+        };
+      };
+      const playersWithFav = (players || []).map((p) => ({ ...normalize(p), isFavorite: favSet.has(p.id) }));
+      setRowData(playersWithFav);
     } catch (error) {
       console.error('Error fetching players:', error.response ? error.response.data : error.message);
     }
-  }, [container]);
+  }, [container, instance, accounts]);
 
   useEffect(() => {
     fetchPlayers();
   }, [fetchPlayers]);
 
+  // ---- Favorit-toggle -----------------------------------------------------------
+  const toggleFavorite = async (player) => {
+    try {
+      const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
+      const scopes = apiScopeStr
+        ? apiScopeStr.split(',').map(s => s.trim()).filter(Boolean)
+        : [`api://${process.env.REACT_APP_API_CLIENT_ID}/.default`];
+
+      let headers = { 'Content-Type': 'application/json' };
+      try {
+        const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
+        if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
+      } catch (_) { /* dev utan token */ }
+      headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+
+      if (favorites.has(player.id)) {
+        await fetch(`${API_BASE}/favorites`, {
+          method: 'DELETE',
+          headers,
+          body: JSON.stringify({ playerId: player.id })
+        });
+        const next = new Set(favorites);
+        next.delete(player.id);
+        setFavorites(next);
+        setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: false } : r));
+      } else {
+        await fetch(`${API_BASE}/favorites`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ playerId: player.id })
+        });
+        const next = new Set(favorites);
+        next.add(player.id);
+        setFavorites(next);
+        setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: true } : r));
+      }
+    } catch (e) {
+      console.error('Toggle favorite failed:', e);
+    }
+  };
+
+  // ---- Spara rating/kommentar (tills vi flyttar till backend endpoint) ---------
   const savePlayerData = async (playerId, data) => {
     try {
+      if (!container) {
+        console.warn('Cosmos not configured; skipping save');
+        return;
+      }
       const { resource } = await container.items.upsert(data, { partitionKey: playerId });
       console.log('Saved to Cosmos:', resource);
     } catch (err) {
@@ -152,12 +157,15 @@ const PlayerList = () => {
     }
   };
 
+  // ---- Grid handlers ------------------------------------------------------------
   const onCellValueChanged = async (params) => {
-    console.log('Cell value changed', params.colDef.headerName, 'old:', params.oldValue, 'new:', params.newValue);
     const campIndex = params.colDef.campIndex;
     const cat = params.colDef.cat;
     let needSave = false;
+
     if (cat) {
+      if (!params.data.ratings) params.data.ratings = [{},{},{},{},{}];
+      if (!params.data.ratings[campIndex]) params.data.ratings[campIndex] = {};
       if (params.oldValue !== params.newValue) {
         params.data.ratings[campIndex][cat] = params.newValue;
         params.data.ratings[campIndex].by = currentUser;
@@ -166,6 +174,20 @@ const PlayerList = () => {
         params.api.refreshCells({ columns: [`average_${campIndex}`], rowNodes: [params.node], force: true });
       }
     } else if (params.colDef.headerName === 'Kommentarer') {
+      // Säkra comments-array + element
+      if (!params.data.comments) {
+        params.data.comments = [
+          { value: '', by: '', timestamp: '' },
+          { value: '', by: '', timestamp: '' },
+          { value: '', by: '', timestamp: '' },
+          { value: '', by: '', timestamp: '' },
+          { value: '', by: '', timestamp: '' },
+        ];
+      }
+      if (!params.data.comments[campIndex]) {
+        params.data.comments[campIndex] = { value: '', by: '', timestamp: '' };
+      }
+
       if (params.oldValue !== params.newValue) {
         params.data.comments[campIndex].value = params.newValue;
         params.data.comments[campIndex].by = currentUser;
@@ -173,6 +195,7 @@ const PlayerList = () => {
         needSave = true;
       }
     }
+
     if (needSave) {
       const item = {
         id: params.data.id,
@@ -191,19 +214,20 @@ const PlayerList = () => {
     }
   };
 
+  // ---- Betygs-helpers -----------------------------------------------------------
   const gradeToNumber = (grade) => {
     const map = { 'A': 5, 'B': 4, 'C': 3, 'D': 2, 'E': 1, 'F': 0 };
     return map[grade] || 0;
   };
 
   const calculateAverage = (rating) => {
-    const values = categories.map(key => gradeToNumber(rating[key]));
+    const values = categories.map(key => gradeToNumber(rating?.[key] || 'F'));
     const averageNum = (values.reduce((a, b) => a + b, 0) / categories.length);
     return ['A', 'B', 'C', 'D', 'E', 'F'][5 - Math.round(averageNum)];
   };
 
   const ratingAverageRenderer = (params, campIndex) => {
-    const rating = params.data.ratings[campIndex] || {};
+    const rating = (params.data?.ratings && params.data.ratings[campIndex]) ? params.data.ratings[campIndex] : {};
     const averageGrade = calculateAverage(rating);
     const by = rating.by ? ` by ${rating.by}` : '';
     const ts = rating.timestamp ? ` at ${new Date(rating.timestamp).toLocaleString()}` : '';
@@ -211,7 +235,9 @@ const PlayerList = () => {
   };
 
   const commentsRenderer = (params, campIndex) => {
-    const comment = params.data.comments[campIndex] || { value: '', by: '', timestamp: '' };
+    const comment = (params.data?.comments && params.data.comments[campIndex])
+      ? params.data.comments[campIndex]
+      : { value: '', by: '', timestamp: '' };
     const value = comment.value || '';
     const by = comment.by ? ` by ${comment.by}` : '';
     const ts = comment.timestamp ? ` at ${new Date(comment.timestamp).toLocaleString()}` : '';
@@ -220,60 +246,27 @@ const PlayerList = () => {
 
   const onGridReady = (params) => {
     gridRef.current.api = params.api;
-    setTimeout(() => addDots(params.api), 500);
   };
 
-  const addDots = (api) => {
-    const scrollViewport = document.querySelector('.ag-body-horizontal-scroll-viewport');
-    if (!scrollViewport) return;
-    const scrollWidth = scrollViewport.scrollWidth;
-    const clientWidth = scrollViewport.clientWidth;
-    const dotContainer = document.createElement('div');
-    dotContainer.style.position = 'absolute';
-    dotContainer.style.bottom = '0';
-    dotContainer.style.left = '0';
-    dotContainer.style.width = '100%';
-    dotContainer.style.height = '30px';
-    dotContainer.style.pointerEvents = 'none';
-    dotContainer.style.background = 'linear-gradient(to right, #ff0000, #ff0000)'; // Red line like YouTube
-    dotContainer.style.height = '2px';
-    const progressBar = document.createElement('div');
-    progressBar.style.position = 'absolute';
-    progressBar.style.left = '0';
-    progressBar.style.bottom = '0';
-    progressBar.style.height = '2px';
-    progressBar.style.backgroundColor = '#ff0000';
-    progressBar.style.width = '0%';
-    dotContainer.appendChild(progressBar);
-    scrollViewport.addEventListener('scroll', () => {
-      const scrollLeft = scrollViewport.scrollLeft;
-      const progress = (scrollLeft / (scrollWidth - clientWidth)) * 100;
-      progressBar.style.width = `${progress}%`;
-    });
-    camps.forEach((camp, index) => {
-      const columnGroup = api.getColumnGroup(camp);
-      if (columnGroup) {
-        const left = columnGroup.getLeft();
-        const position = (left / (scrollWidth - clientWidth)) * 100;
-        const dot = document.createElement('div');
-        dot.style.position = 'absolute';
-        dot.style.left = `${position}%`;
-        dot.style.bottom = '10px';
-        dot.style.width = '12px';
-        dot.style.height = '12px';
-        dot.style.backgroundColor = '#ff0000';
-        dot.style.borderRadius = '50%';
-        dot.style.cursor = 'pointer';
-        dot.style.pointerEvents = 'auto';
-        dot.title = camp;
-        dot.onclick = () => api.ensureColumnVisible(columnGroup.getColGroupDef().children[0].colId, 'start');
-        dotContainer.appendChild(dot);
-      }
-    });
-    scrollViewport.appendChild(dotContainer);
+  // ---- Heart cell ---------------------------------------------------------------
+  const HeartCell = (props) => {
+    const isFav = props.data?.isFavorite;
+    const onClick = () => toggleFavorite(props.data);
+    return (
+      <span style={{ cursor: 'pointer', fontSize: '18px' }} onClick={onClick}>
+        {isFav ? '❤️' : '🤍'}
+      </span>
+    );
   };
 
+  // ---- Column defs --------------------------------------------------------------
   const columnDefs = useMemo(() => [
+    {
+      headerName: '❤',
+      width: 80,
+      pinned: 'left',
+      cellRenderer: HeartCell
+    },
     { headerName: 'Spelarnamn', field: 'spelarnamn', sortable: true, filter: true, pinned: 'left' },
     { headerName: 'Kön', field: 'kon', sortable: true, filter: true },
     { headerName: 'Ålderspelare', field: 'alderspelare', sortable: true, filter: true },
@@ -282,6 +275,7 @@ const PlayerList = () => {
     { headerName: 'Aktuell Serie', field: 'aktuellserie', sortable: true, filter: true },
     { headerName: 'Mobilnummer', field: 'mobilnummer', sortable: true, filter: true },
     { headerName: 'Spelarmejl', field: 'spelarmejl', sortable: true, filter: true },
+    { headerName: 'T-Shirt storlek', field: 'tshirt_storlek', sortable: true, filter: true },
     { headerName: 'Föräldrar namn', field: 'name', sortable: true, filter: true },
     { headerName: 'Föräldrar Email', field: 'email', sortable: true, filter: true },
     { headerName: 'Föräldrar Telefon', field: 'phone', sortable: true, filter: true },
@@ -289,7 +283,10 @@ const PlayerList = () => {
     ...camps.flatMap((camp, campIndex) => [
       {
         headerName: `${camp} Anmäld`,
-        valueGetter: (params) => params.data.registeredCamps[campIndex] ? 'Ja' : 'Nej',
+        valueGetter: (params) => {
+          const regs = params.data?.registeredCamps;
+          return (Array.isArray(regs) && regs[campIndex]) ? 'Ja' : 'Nej';
+        },
         width: 120
       },
       {
@@ -298,11 +295,17 @@ const PlayerList = () => {
         children: [
           ...categories.map((cat, catIndex) => ({
             headerName: categoryTitles[catIndex],
-            editable: (params) => params.data.registeredCamps[campIndex],
+            editable: (params) => !!params.data?.registeredCamps?.[campIndex],
             cellEditor: 'agSelectCellEditor',
             cellEditorParams: { values: ['A', 'B', 'C', 'D', 'E', 'F'] },
-            valueGetter: (params) => params.data.ratings[campIndex][cat] || 'F',
+            valueGetter: (params) => {
+              const ratings = params.data?.ratings;
+              if (!Array.isArray(ratings) || !ratings[campIndex]) return 'F';
+              return ratings[campIndex][cat] || 'F';
+            },
             valueSetter: (params) => {
+              if (!params.data.ratings) params.data.ratings = [{},{},{},{},{}];
+              if (!params.data.ratings[campIndex]) params.data.ratings[campIndex] = {};
               params.data.ratings[campIndex][cat] = params.newValue;
               return true;
             },
@@ -313,17 +316,30 @@ const PlayerList = () => {
           {
             headerName: 'Genomsnitt',
             cellRenderer: (params) => ratingAverageRenderer(params, campIndex),
-            valueGetter: (params) => calculateAverage(params.data.ratings[campIndex] || {}),
+            valueGetter: (params) => calculateAverage(params.data?.ratings?.[campIndex] || {}),
             colId: `average_${campIndex}`
           },
           {
             headerName: 'Kommentarer',
-            editable: (params) => params.data.registeredCamps[campIndex],
+            editable: (params) => !!params.data?.registeredCamps?.[campIndex],
             cellEditor: 'agLargeTextCellEditor',
             cellRenderer: (params) => commentsRenderer(params, campIndex),
             width: 300,
-            valueGetter: (params) => params.data.comments[campIndex]?.value || '',
+            valueGetter: (params) => {
+              const comments = params.data?.comments;
+              if (!Array.isArray(comments) || !comments[campIndex]) return '';
+              return comments[campIndex].value || '';
+            },
             valueSetter: (params) => {
+              if (!params.data.comments) {
+                params.data.comments = [
+                  { value:'',by:'',timestamp:'' },
+                  { value:'',by:'',timestamp:'' },
+                  { value:'',by:'',timestamp:'' },
+                  { value:'',by:'',timestamp:'' },
+                  { value:'',by:'',timestamp:'' }
+                ];
+              }
               if (!params.data.comments[campIndex]) {
                 params.data.comments[campIndex] = { value: '', by: '', timestamp: '' };
               }
@@ -335,7 +351,12 @@ const PlayerList = () => {
         ]
       }
     ])
-  ], []);
+  ], [toggleFavorite, ratingAverageRenderer, calculateAverage, onCellValueChanged, HeartCell]);
+
+  // ---- Filter “visa favoriter” --------------------------------------------------
+  const displayRows = useMemo(() => {
+    return showOnlyFavorites ? rowData.filter(r => r.isFavorite) : rowData;
+  }, [rowData, showOnlyFavorites]);
 
   const renderCategoryInfo = (title, description) => (
     <Box key={title} mb="4">
@@ -351,9 +372,13 @@ const PlayerList = () => {
         <Flex>
           <Button variant='brand' size='sm'>Ni kan endast fylla i läger betyg. </Button>
           <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg Info - Läs mer</Button>
+          <Button size='sm' ml='2' onClick={() => setShowOnlyFavorites(v => !v)}>
+            {showOnlyFavorites ? 'Visa alla' : 'Visa favoriter'}
+          </Button>
         </Flex>
       </Flex>
       <Text mb='4' color='secondaryGray.600'>Du ser endast godkända och registrerade spelare, scrolla för att hitta till olika läger.</Text>
+
       <style>
         {`
           .camp-header-0 { background-color: #f0f8ff; } /* AliceBlue for Läger 1 */
@@ -368,10 +393,11 @@ const PlayerList = () => {
           .ag-body-horizontal-scroll-thumb { background-color: #555; height: 30px; border-radius: 5px; }
         `}
       </style>
+
       <div className="ag-theme-quartz" style={{ height: 650, width: '100%' }}>
         <AgGridReact
           ref={gridRef}
-          rowData={rowData}
+          rowData={displayRows}
           columnDefs={columnDefs}
           pagination={true}
           paginationPageSize={50}
@@ -380,13 +406,17 @@ const PlayerList = () => {
           onGridReady={onGridReady}
         />
       </div>
+
       <Modal isOpen={isOpen} onClose={onClose} size="xl">
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>Betyg Förklaringar</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
-            <Text mb="4">Ange betyg för varje läger och kategori A-F, där A är högsta betyget. Allt sparas automatiskt i Databsen hos Stockholm Basket.</Text>
+            <Text mb="4">
+              Ange betyg för varje läger och kategori A-F, där A är högsta betyget.
+              Allt sparas automatiskt i Databasen hos Stockholm Basket.
+            </Text>
             {renderCategoryInfo('Bollkontroll', 'Spelarens teknik med boll, förmåga att hantera press, dribbla med båda händer, samt kontroll under matchtempo. Bedömning grundas på bollsäkerhet, rytm och kreativitet i spelet.')}
             {renderCategoryInfo('Försvar', 'Individens förmåga att hålla sin spelare, förstå rotationsprinciper, sätta press, hjälpa laget och visa fysisk samt mental närvaro i försvarsspelet.')}
             {renderCategoryInfo('Anfall', 'Hur spelaren rör sig utan boll, beslutsfattande i 1v1, avslutsförmåga, spelförståelse i passningar och tempo, samt helhet i anfallsspelet.')}

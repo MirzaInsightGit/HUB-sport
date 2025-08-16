@@ -1,334 +1,252 @@
 // src/api/profixioApi.js
 import axios from 'axios';
+import { API_BASE } from '../config/apiBase';
 
-const BACKEND_URL =
-  'https://stockholmbasket-express-api-avf6ayfkdnc3b6gn.centralus-01.azurewebsites.net/api/profixio';
+// Build backend base from env-aware API_BASE (local/prod)
+const BACKEND_URL = `${API_BASE}/profixio`;
+
+// Helper: headers only when a token is provided (backend may bypass locally)
+const auth = (token) => (token ? { headers: { Authorization: `Bearer ${token}` } } : {});
+
+// Helper: merge params + optional auth
+const withParams = (params = {}, token) => ({ params, ...auth(token) });
+
+// Optional: common axios config (timeouts etc.)
+const http = axios.create({ timeout: 15000 });
 
 export const getUserInfo = async (token) => {
-  const res = await axios.get(`${BACKEND_URL}/userinfo`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/userinfo`, auth(token));
   return res.data;
 };
 
 export const getSports = async (params = {}, token) => {
-  const res = await axios.get(`${BACKEND_URL}/sports`, {
-    params,
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/sports`, withParams(params, token));
   return res.data;
 };
 
 export const getMatchSetup = async (kamp, token) => {
-  const res = await axios.get(`${BACKEND_URL}/matches/${kamp}/setup`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/matches/${kamp}/setup`, auth(token));
   return res.data;
 };
 
 export const getMatchEventTypes = async (organisation_id, params = {}, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/organisations/${organisation_id}/matchEventTypes`,
-    {
-      params,
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    withParams(params, token)
   );
   return res.data;
 };
 
 export const getMatchLineup = async (tournament_id, match_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}/lineup`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getMatchEvents = async (tournament_id, match_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}/events`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getSeasonMatches = async (season_id, token) => {
-  const res = await axios.get(`${BACKEND_URL}/seasons/${season_id}/matches`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/seasons/${season_id}/matches`, auth(token));
   return res.data;
 };
 
 export const getSeasonDeletedMatches = async (season_id, token) => {
-  const res = await axios.get(
-    `${BACKEND_URL}/seasons/${season_id}/deletedMatches`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
-  );
+  const res = await http.get(`${BACKEND_URL}/seasons/${season_id}/deletedMatches`, auth(token));
   return res.data;
 };
 
 export const getTournamentTables = async (tournament_id, token) => {
-  const res = await axios.get(
-    `${BACKEND_URL}/tournaments/${tournament_id}/tables`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+  const res = await http.get(`${BACKEND_URL}/tournaments/${tournament_id}/tables`, auth(token));
+  return res.data;
+};
+
+// NOTE: supports pagination with params (e.g., { page, limit })
+export const getTournamentMatches = async (tournament_id, params = {}, token) => {
+  const res = await http.get(
+    `${BACKEND_URL}/tournaments/${tournament_id}/matches`,
+    withParams(params, token)
   );
   return res.data;
 };
 
-// NOTE: stöder pagination med params (t.ex. { page, limit })
-export const getTournamentMatches = async (tournament_id, params = {}, token) => {
-  const res = await axios.get(`${BACKEND_URL}/tournaments/${tournament_id}/matches`, {
-    params,
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return res.data;
-};
-
 export const getMatch = async (tournament_id, match_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const postMatchGameUrl = async (tournament_id, match_id, data, token) => {
-  const res = await axios.post(
+  const res = await http.post(
     `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}/game_url`,
     data,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const putMatch = async (tournament_id, match_id, data, token) => {
-  const res = await axios.put(
+  const res = await http.put(
     `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}`,
     data,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getOrganisation = async (id, token) => {
-  const res = await axios.get(`${BACKEND_URL}/organisations/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/organisations/${id}`, auth(token));
   return res.data;
 };
 
 export const getOrganisationCategories = async (organisation_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/organisations/${organisation_id}/categories`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getOrganisationClubs = async (organisation_id, token) => {
-  const res = await axios.get(
-    `${BACKEND_URL}/organisations/${organisation_id}/clubs`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
-  );
+  const res = await http.get(`${BACKEND_URL}/organisations/${organisation_id}/clubs`, auth(token));
   return res.data;
 };
 
-export const getOrganisationAllPlayers = async (
-  organisation_id,
-  params = {},
-  token
-) => {
-  const res = await axios.get(
+export const getOrganisationAllPlayers = async (organisation_id, params = {}, token) => {
+  const res = await http.get(
     `${BACKEND_URL}/organisations/${organisation_id}/allPlayers`,
-    {
-      params,
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    withParams(params, token)
   );
   return res.data;
 };
 
 export const getOrganisationDistricts = async (organisation_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/organisations/${organisation_id}/districts`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getOrganisationDistrict = async (organisation_id, id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/organisations/${organisation_id}/districts/${id}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getOrganisationInvoices = async (organisation_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/organisations/${organisation_id}/invoices`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
-export const getOrganisationInvoice = async (
-  organisation_id,
-  number,
-  token
-) => {
-  const res = await axios.get(
+export const getOrganisationInvoice = async (organisation_id, number, token) => {
+  const res = await http.get(
     `${BACKEND_URL}/organisations/${organisation_id}/invoices/${number}`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
-export const postOrganisationInvoicesBulkUpdate = async (
-  organisation_id,
-  data,
-  token
-) => {
-  const res = await axios.post(
+export const postOrganisationInvoicesBulkUpdate = async (organisation_id, data, token) => {
+  const res = await http.post(
     `${BACKEND_URL}/organisations/${organisation_id}/invoices/bulkUpdate`,
     data,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getTournamentRankingPoints = async (tournament_id, token) => {
-  const res = await axios.get(
-    `${BACKEND_URL}/tournaments/${tournament_id}/rankingpoints`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
-  );
+  const res = await http.get(`${BACKEND_URL}/tournaments/${tournament_id}/rankingpoints`, auth(token));
   return res.data;
 };
 
 export const getTournament = async (id, token) => {
-  const res = await axios.get(`${BACKEND_URL}/tournaments/${id}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/tournaments/${id}`, auth(token));
   return res.data;
 };
 
 export const getTournamentTeams = async (tournament_id, params = {}, token) => {
-  const res = await axios.get(`${BACKEND_URL}/tournaments/${tournament_id}/teams`, {
-    params,
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(
+    `${BACKEND_URL}/tournaments/${tournament_id}/teams`,
+    withParams(params, token)
+  );
   return res.data;
 };
 
-export const getTournamentGlobalTeams = async (
-  tournament_id,
-  params = {},
-  token
-) => {
-  const res = await axios.get(
+export const getTournamentGlobalTeams = async (tournament_id, params = {}, token) => {
+  const res = await http.get(
     `${BACKEND_URL}/tournaments/${tournament_id}/globalTeams`,
-    {
-      params,
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    withParams(params, token)
   );
   return res.data;
 };
 
 export const getTournamentClubs = async (tournament_id, params = {}, token) => {
-  const res = await axios.get(`${BACKEND_URL}/tournaments/${tournament_id}/clubs`, {
-    params,
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(
+    `${BACKEND_URL}/tournaments/${tournament_id}/clubs`,
+    withParams(params, token)
+  );
   return res.data;
 };
 
 export const getTournamentMatchCategories = async (tournament_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/tournaments/${tournament_id}/matchCategories`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getTournamentMatchGroups = async (tournament_id, token) => {
-  const res = await axios.get(
+  const res = await http.get(
     `${BACKEND_URL}/tournaments/${tournament_id}/matchGroups`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    auth(token)
   );
   return res.data;
 };
 
 export const getTournamentArenas = async (tournament_id, token) => {
-  const res = await axios.get(`${BACKEND_URL}/tournaments/${tournament_id}/arenas`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/tournaments/${tournament_id}/arenas`, auth(token));
   return res.data;
 };
 
 export const getTournamentsForOrg = async (orgId, params = {}, token) => {
-  const res = await axios.get(`${BACKEND_URL}/organisations/${orgId}/tournaments`, {
-    params,
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(
+    `${BACKEND_URL}/organisations/${orgId}/tournaments`,
+    withParams(params, token)
+  );
   return res.data;
 };
 
 export const getSeasons = async (orgId, sportId, token) => {
-  const res = await axios.get(`${BACKEND_URL}/organisations/${orgId}/seasons`, {
-    params: { sportId },
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const p = { sportId: sportId || 'BB' };
+  const res = await http.get(`${BACKEND_URL}/organisations/${orgId}/seasons`, withParams(p, token));
   return res.data;
 };
 
 export const getSeasonTournaments = async (season_id, params = {}, token) => {
-  const res = await axios.get(`${BACKEND_URL}/seasons/${season_id}/tournaments`, {
-    params,
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const p = { sportId: 'BB', ...params };
+  const res = await http.get(`${BACKEND_URL}/seasons/${season_id}/tournaments`, withParams(p, token));
   return res.data;
 };
 
 // --- NEW: season tree (ersätter leagues) ---
 export const getSeasonTree = async (season_id, token) => {
-  const res = await axios.get(`${BACKEND_URL}/seasons/${season_id}/tree`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await http.get(`${BACKEND_URL}/seasons/${season_id}/tree`, auth(token));
   return res.data;
 };
