@@ -12,5 +12,11 @@
       "route": "/auth/*",
       "serve": "/index.html"
     }
-  ]
+  ],
+  "platform": {
+    "apiRuntime": "node:18"
+  },
+  "reverseProxy": {
+    "/api/*": "https://stockholmbasket-express-api-avf6ayfkdnc3b6gn.centralus-01.azurewebsites.net"
+  }
 }
