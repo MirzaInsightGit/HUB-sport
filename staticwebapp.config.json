@@ -11,12 +11,18 @@
     {
       "route": "/auth/*",
       "serve": "/index.html"
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": ["anonymous"],
+      "proxy": {
+        "backendUri": "https://stockholmbasket-express-api-avf6ayfkdnc3b6gn.centralus-01.azurewebsites.net"
+      }
     }
   ],
-  "platform": {
-    "apiRuntime": "node:18"
-  },
-  "reverseProxy": {
-    "/api/*": "https://stockholmbasket-express-api-avf6ayfkdnc3b6gn.centralus-01.azurewebsites.net"
+  "responseOverrides": {
+    "401": {
+      "rewrite": "/index.html"
+    }
   }
 }
