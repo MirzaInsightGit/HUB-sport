@@ -45,7 +45,33 @@ import {
 } from "../../api/profixioApi";
 import useAuth from "../../hooks/useAuth";
 
+
 /* ---------------- helpers ---------------- */
+
+// ------- API base resolver (single source of truth) -------
+const resolveApiBase = () => {
+  // 1) If a global override is injected (e.g. by the hosting page), prefer it
+  const injected = (typeof window !== 'undefined' && window.__HUB_API_BASE__)
+    ? String(window.__HUB_API_BASE__)
+    : '';
+  if (injected) return injected.replace(/\/$/, '');
+
+  // 2) CRA/Env variables
+  const env = process.env.REACT_APP_API_BASE || '';
+  if (env) return String(env).replace(/\/$/, '');
+
+  // 3) Fallbacks: local dev vs prod (reverse proxy)
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1';
+    // Local should hit the Express server directly under /api
+    // Prod should rely on reverse proxy mounted at /api
+    return isLocal ? 'http://localhost:8080/api' : '/api';
+  }
+  return '/api';
+};
+
+const API_BASE = resolveApiBase();
 
 const normalizeMatches = (raw) => {
   const list = Array.isArray(raw) ? raw : raw?.data || [];
@@ -195,6 +221,8 @@ const getPointsFromEvent = (ev) => {
 export default function TournamentDetails() {
   const { tournamentId } = useParams();
   const { user } = useAuth();
+  // Which tab is active: 0 = Topp 20 spelare, 1 = Lagstatistik, 2 = Enskilda Matcher
+  const [tabIndex, setTabIndex] = useState(0);
 
   // Memoiserad bearer för ESLint + stabil deps
   const bearer = useMemo(
@@ -247,6 +275,9 @@ export default function TournamentDetails() {
   const [tournamentTopLoading, setTournamentTopLoading] = useState(false);
   const [tournamentTopError, setTournamentTopError] = useState(null);
   const [tournamentTopUrl, setTournamentTopUrl] = useState(null);
+  // UI: allow manual reload on failure or rate-limit
+  const [reloadKey, setReloadKey] = useState(0);
+  const triggerReload = () => setReloadKey((x) => x + 1);
   // Memoized: combine duplicate players by stable key and compute per-game avg + mix
   const tournamentTopCombined = useMemo(() => {
     if (!Array.isArray(tournamentTop)) return [];
@@ -369,22 +400,64 @@ export default function TournamentDetails() {
   }, [tournamentTop]);
   // UI: player detail modal (from Top 20 list)
   const [selectedPlayer, setSelectedPlayer] = useState(null);
-  // Fetch top 20 scorers for the whole tournament
+  // Fetch top 20 scorers for the whole tournament (with downshift/backoff to avoid 504/429)
+  // Run this only when the Top 20 tab (index 0) is active to avoid unnecessary load.
   useEffect(() => {
-    if (!tournamentId) return;
+    if (!tournamentId || tabIndex !== 0) {
+      // Clear any pending state when tab is not active
+      setTournamentTopLoading(false);
+      setTournamentTopError(null);
+      return;
+    }
     let aborted = false;
 
-    const API_BASE =
-      (typeof window !== 'undefined' && window.__HUB_API_BASE__) ||
-      process.env.REACT_APP_API_BASE ||
-      process.env.VITE_API_BASE ||
-      'http://localhost:8080';
+    const withTimeout = (ms, promise, controller) =>
+      Promise.race([
+        promise,
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            try { controller?.abort(); } catch {}
+            reject(new Error(`Timeout efter ${ms} ms`));
+          }, ms)
+        ),
+      ]);
+
+    // One request that respects 429/Retry-After and supports abort/timeout
+    const doRequest = async (url, tries = 3, timeoutMs = 120000) => {
+      let lastErr;
+      for (let i = 0; i < tries; i++) {
+        const ctrl = new AbortController();
+        try {
+          const res = await withTimeout(
+            timeoutMs,
+            fetch(url, { credentials: 'include', signal: ctrl.signal }),
+            ctrl
+          );
+
+          // Respect 429 with Retry-After
+          if (res.status === 429) {
+            const retryAfter = Number(res.headers.get('retry-after'));
+            const delayMs = !Number.isNaN(retryAfter) ? retryAfter * 1000 : 800 * (i + 1);
+            await new Promise((r) => setTimeout(r, delayMs));
+            continue;
+          }
+
+          return res;
+        } catch (e) {
+          lastErr = e;
+          // brief backoff then retry
+          await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+        }
+      }
+      if (lastErr) throw lastErr;
+      // final attempt
+      return fetch(url, { credentials: 'include' });
+    };
 
     const safeJson = async (res) => {
       const ct = res.headers.get('content-type') || '';
       if (ct.includes('application/json')) return res.json();
       const text = await res.text();
-      // try JSON anyway
       try { return JSON.parse(text); } catch (_) {}
       const snippet = text.slice(0, 140).replace(/\n/g, ' ');
       throw new Error(`Oväntat svar (status ${res.status}): ${snippet}`);
@@ -394,25 +467,52 @@ export default function TournamentDetails() {
       try {
         setTournamentTopLoading(true);
         setTournamentTopError(null);
-        // Hämta stort tak och aggregera i UI (undviker dubbletter av samma spelare)
-        const url = `${API_BASE}/stats/top-scorers-from-tournament?tournamentId=${encodeURIComponent(tournamentId)}&limit=9999`;
-        setTournamentTopUrl(url);
 
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) {
-          // still try to read body for better error
+        const base = String(API_BASE).replace(/\/$/, '');
+        // More conservative batch sizes to reduce rate-limit/504 risk
+        const limits = [10, 7, 5, 3, 2];
+        let finalItems = [];
+        let lastErrorMessage = '';
+
+        for (let i = 0; i < limits.length; i++) {
+          const mm = limits[i];
+          const url = `${base}/stats/top-scorers-from-tournament?tournamentId=${tournamentId}&limit=20&maxMatches=${mm}`;
+          setTournamentTopUrl(url);
+
           try {
-            const errBody = await res.text();
-            const snippet = errBody.slice(0, 140).replace(/\n/g, ' ');
-            throw new Error(`HTTP ${res.status}: ${snippet}`);
-          } catch (e) {
-            throw new Error(`HTTP ${res.status}`);
+            const res = await doRequest(url, 3, 120000);
+            if (!res.ok) {
+              // If 504/502, try next smaller batch; otherwise surface the error
+              if (res.status === 504 || res.status === 502) {
+                lastErrorMessage = `HTTP ${res.status}`;
+                continue;
+              }
+              const txt = await res.text().catch(() => '');
+              const snippet = txt.slice(0, 140).replace(/\n/g, ' ');
+              throw new Error(`HTTP ${res.status}: ${snippet}`);
+            }
+
+            const json = await safeJson(res);
+            const items = Array.isArray(json?.items) ? json.items : [];
+            finalItems = items;
+            break; // success
+          } catch (err) {
+            // Network error or timeout — try smaller batch
+            lastErrorMessage = (err?.name === 'AbortError' || /Timeout/i.test(err?.message || ''))
+              ? 'Tidsgräns överskreds (servern svarade inte i tid)'
+              : (err?.message || 'Okänt fel');
+            continue;
           }
         }
-        const json = await safeJson(res);
 
-        const items = Array.isArray(json?.items) ? json.items : [];
-        if (!aborted) setTournamentTop(items);
+        if (!aborted) {
+          if (finalItems.length === 0 && lastErrorMessage) {
+            setTournamentTop([]);
+            setTournamentTopError(`Kunde inte hämta data (försökte med mindre batchar). Senaste fel: ${lastErrorMessage}`);
+          } else {
+            setTournamentTop(finalItems);
+          }
+        }
       } catch (err) {
         if (!aborted) {
           setTournamentTop([]);
@@ -427,7 +527,7 @@ export default function TournamentDetails() {
     return () => {
       aborted = true;
     };
-  }, [tournamentId]);
+  }, [tournamentId, reloadKey, tabIndex]);
 
   // Team name -> players[]
   const teamPlayersByName = useMemo(() => {
@@ -436,8 +536,9 @@ export default function TournamentDetails() {
     return map;
   }, [teams]);
 
+  // Fetch match-specific data only when the "Enskilda Matcher" tab is active
   useEffect(() => {
-    if (!bearer || !tournamentId || !selected?.id) return;
+    if (tabIndex !== 2 || !bearer || !tournamentId || !selected?.id) return;
 
     let cancelled = false;
     const run = async () => {
@@ -694,6 +795,7 @@ export default function TournamentDetails() {
       cancelled = true;
     };
   }, [
+    tabIndex,
     bearer,
     tournamentId,
     selected?.id,
@@ -727,7 +829,7 @@ export default function TournamentDetails() {
         <Badge variant="subtle" colorScheme="purple">ID: {tournamentId}</Badge>
       </Box>
 
-      <Tabs colorScheme="purple" variant="enclosed">
+      <Tabs colorScheme="purple" variant="enclosed" index={tabIndex} onChange={setTabIndex}>
         <TabList>
           <Tab>Topp 20 spelare</Tab>
           <Tab>Lagstatistik</Tab>
@@ -746,9 +848,19 @@ export default function TournamentDetails() {
                 {tournamentTopLoading ? (
                   <HStack><Spinner size="sm" /><Text>Hämtar topp 20…</Text></HStack>
                 ) : tournamentTopError ? (
-                  <Stack spacing={1}>
-                    <Text color="red.500" whiteSpace="normal" wordBreak="break-word">Fel: {tournamentTopError}</Text>
-                    <Text fontSize="xs" opacity={0.6}>Förfrågan: {tournamentTopUrl}</Text>
+                  <Stack spacing={2}>
+                    <Text color="red.500" whiteSpace="normal" wordBreak="break-word">
+                      Fel: {tournamentTopError}
+                    </Text>
+                    <Text fontSize="xs" opacity={0.6}>
+                      Förfrågan: {tournamentTopUrl}
+                    </Text>
+                    <HStack>
+                      <Button size="sm" onClick={triggerReload}>Försök igen</Button>
+                      <Text fontSize="xs" opacity={0.6}>
+                        Tips: Ladda om sidan om felet kvarstår.
+                      </Text>
+                    </HStack>
                   </Stack>
                 ) : tournamentTopCombined.length === 0 ? (
                   <Text>Ingen poängdata att visa.</Text>
