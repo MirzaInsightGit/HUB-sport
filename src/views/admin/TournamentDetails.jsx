@@ -247,19 +247,40 @@ export default function TournamentDetails() {
   const [tournamentTopLoading, setTournamentTopLoading] = useState(false);
   const [tournamentTopError, setTournamentTopError] = useState(null);
   const [tournamentTopUrl, setTournamentTopUrl] = useState(null);
-  // Memoized: combine duplicate players by playerId, sum points/matches, compute avgPoints
+  // Memoized: combine duplicate players by stable key and compute per-game avg + mix
   const tournamentTopCombined = useMemo(() => {
     if (!Array.isArray(tournamentTop)) return [];
-    const byId = new Map();
+
+    // Normalize player name to a stable slug without diacritics/punctuation
+    const normalizeName = (name) => {
+      return String(name || "")
+        .normalize("NFD").replace(/\p{Diacritic}+/gu, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    };
+
+    const primary = new Map();
+
+    // 1) First pass — merge by playerId when present; otherwise by name+team
     for (const p of tournamentTop) {
-      const id = p.playerId ?? p.personId ?? p.id ?? p.number ?? `${p.name}-${p.teamId ?? ''}`;
-      const key = String(id);
-      const cur = byId.get(key) || {
-        playerId: p.playerId ?? p.personId ?? p.id ?? null,
-        name: p.name || 'Okänd spelare',
+      const name = p.name || "Okänd spelare";
+      const teamId = p.teamId ?? null;
+      const teamName = p.teamName ?? "—";
+      const playerId = p.playerId ?? p.personId ?? p.id ?? null;
+
+      // Prefer numeric/string playerId; else fallback to composite name+team key
+      const nameKey = normalizeName(name);
+      const fallbackKey = `${nameKey}|${teamId ?? teamName}`;
+      const key = playerId != null ? `id:${playerId}` : `nt:${fallbackKey}`;
+
+      const cur = primary.get(key) || {
+        playerId,
+        name,
         number: p.number ?? null,
-        teamId: p.teamId ?? null,
-        teamName: p.teamName ?? '—',
+        teamId,
+        teamName,
         points: 0,
         made1: 0,
         made2: 0,
@@ -269,42 +290,81 @@ export default function TournamentDetails() {
         matchesCount: 0,
         periodPoints: {},
         lastEventAt: p.lastEventAt ?? null,
+        _nameKey: nameKey,
       };
+
       cur.points += Number(p.points ?? 0) || 0;
       cur.made1 += Number(p.made1 ?? p.ft ?? 0) || 0;
       cur.made2 += Number(p.made2 ?? 0) || 0;
       cur.made3 += Number(p.made3 ?? 0) || 0;
       cur.fouls += Number(p.fouls ?? 0) || 0;
+
       const count = Number(p.matchesCount ?? (Array.isArray(p.matches) ? p.matches.length : 0)) || 0;
       cur.matchesCount += count;
+
       if (Array.isArray(p.matches)) {
         for (const mid of p.matches) {
           if (!cur.matches.includes(mid)) cur.matches.push(mid);
         }
       }
-      // merge period points
+
       if (p.periodPoints && typeof p.periodPoints === 'object') {
         for (const [per, val] of Object.entries(p.periodPoints)) {
           const k = String(per);
           cur.periodPoints[k] = (Number(cur.periodPoints[k] || 0) + (Number(val || 0) || 0));
         }
       }
-      // latest event
+
       if (p.lastEventAt && (!cur.lastEventAt || String(p.lastEventAt) > String(cur.lastEventAt))) {
         cur.lastEventAt = p.lastEventAt;
       }
-      byId.set(key, cur);
+
+      primary.set(key, cur);
     }
-    const arr = Array.from(byId.values()).map((x) => ({
-      ...x,
-      avgPoints: x.matchesCount ? Math.round((x.points / x.matchesCount) * 10) / 10 : x.points,
-    }));
-    // sort by average points (desc), then total points (desc), then name
+
+    // 2) Second pass — if the same person slipped through with different ids, merge by name+team
+    const byNameTeam = new Map();
+    for (const v of primary.values()) {
+      const k = `nt:${v._nameKey}|${v.teamId ?? v.teamName}`;
+      const cur = byNameTeam.get(k);
+      if (!cur) {
+        byNameTeam.set(k, { ...v });
+      } else {
+        cur.points += v.points;
+        cur.made1 += v.made1;
+        cur.made2 += v.made2;
+        cur.made3 += v.made3;
+        cur.fouls += v.fouls;
+        cur.matchesCount += v.matchesCount;
+        v.matches.forEach((mid) => { if (!cur.matches.includes(mid)) cur.matches.push(mid); });
+        Object.entries(v.periodPoints || {}).forEach(([per, val]) => {
+          const key = String(per);
+          cur.periodPoints[key] = (Number(cur.periodPoints[key] || 0) + (Number(val || 0) || 0));
+        });
+        if (v.lastEventAt && (!cur.lastEventAt || String(v.lastEventAt) > String(cur.lastEventAt))) {
+          cur.lastEventAt = v.lastEventAt;
+        }
+      }
+    }
+
+    // 3) Finalize derived metrics
+    const arr = Array.from(byNameTeam.values()).map((x) => {
+      const avgPoints = x.matchesCount ? Math.round((x.points / x.matchesCount) * 10) / 10 : x.points;
+      const madePts = (x.made3 * 3) + (x.made2 * 2) + (x.made1);
+      const mixDen = madePts > 0 ? madePts : x.points || 1; // fallback to points if made breakdown missing
+      const threeShare = Math.round(((x.made3 * 3) / mixDen) * 100);
+      const twoShare = Math.round(((x.made2 * 2) / mixDen) * 100);
+      const oneShare = Math.max(0, 100 - threeShare - twoShare);
+      return { ...x, avgPoints, threeShare, twoShare, oneShare };
+    });
+
+    // Sort by avg points desc, then total points desc, then name asc
     arr.sort((a, b) => {
       if (b.avgPoints !== a.avgPoints) return b.avgPoints - a.avgPoints;
       if (b.points !== a.points) return b.points - a.points;
       return String(a.name || '').localeCompare(String(b.name || ''));
     });
+
     return arr;
   }, [tournamentTop]);
   // UI: player detail modal (from Top 20 list)
@@ -715,12 +775,22 @@ export default function TournamentDetails() {
                           </HStack>
                         </CardHeader>
                         <CardBody pt={0}>
-                          <HStack spacing={2} wrap="wrap">
-                            <Tag size="sm"><TagLabel>{Number(p.made3 ?? 0) || 0}×3p</TagLabel></Tag>
-                            <Tag size="sm"><TagLabel>{Number(p.made2 ?? 0) || 0}×2p</TagLabel></Tag>
-                            <Tag size="sm"><TagLabel>{Number(p.made1 ?? p.ft ?? 0) || 0}×1p</TagLabel></Tag>
-                            <Tag size="sm"><TagLabel>Fouls: {Number(p.fouls ?? 0) || 0}</TagLabel></Tag>
-                          </HStack>
+                          <Stack spacing={2}>
+                            <HStack spacing={2} wrap="wrap">
+                              <Tag size="sm"><TagLabel>{Number(p.made3 ?? 0) || 0}×3p</TagLabel></Tag>
+                              <Tag size="sm"><TagLabel>{Number(p.made2 ?? 0) || 0}×2p</TagLabel></Tag>
+                              <Tag size="sm"><TagLabel>{Number(p.made1 ?? p.ft ?? 0) || 0}×1p</TagLabel></Tag>
+                              <Tag size="sm"><TagLabel>Fouls: {Number(p.fouls ?? 0) || 0}</TagLabel></Tag>
+                            </HStack>
+                            <HStack spacing={2} wrap="wrap">
+                              <Tag size="sm" colorScheme="purple" title="Totalpoäng"><TagLabel>{p.points ?? 0} p totalt</TagLabel></Tag>
+                              <Tag size="sm" colorScheme="gray" title="Antal matcher"><TagLabel>{p.matchesCount ?? 0} matcher</TagLabel></Tag>
+                              <Tag size="sm" title="Poängmix 3p/2p/1p"><TagLabel>{p.threeShare ?? 0}% • {p.twoShare ?? 0}% • {p.oneShare ?? 0}%</TagLabel></Tag>
+                            </HStack>
+                            {p.lastEventAt ? (
+                              <Text fontSize="xs" opacity={0.6}>Senast aktiv: {new Date(p.lastEventAt).toLocaleString()}</Text>
+                            ) : null}
+                          </Stack>
                         </CardBody>
                       </Card>
                     ))}
