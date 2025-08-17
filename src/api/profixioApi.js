@@ -53,6 +53,14 @@ export const getMatchEvents = async (tournament_id, match_id, token) => {
   return res.data;
 };
 
+export const getMatchStats = async (tournament_id, match_id, token) => {
+  const res = await http.get(
+    `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}/stats`,
+    auth(token)
+  );
+  return res.data;
+};
+
 export const getSeasonMatches = async (season_id, token) => {
   const res = await http.get(`${BACKEND_URL}/seasons/${season_id}/matches`, auth(token));
   return res.data;
@@ -78,6 +86,15 @@ export const getTournamentMatches = async (tournament_id, params = {}, token) =>
 };
 
 export const getMatch = async (tournament_id, match_id, token) => {
+  const res = await http.get(
+    `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}`,
+    auth(token)
+  );
+  return res.data;
+};
+
+// ✅ Nytt: alias som din sida importerar
+export const getMatchDetails = async (tournament_id, match_id, token) => {
   const res = await http.get(
     `${BACKEND_URL}/tournaments/${tournament_id}/matches/${match_id}`,
     auth(token)

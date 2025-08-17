@@ -31,26 +31,82 @@ import {
   useProfixioTournamentMatches,
   useProfixioTournamentTeams,
 } from "../../hooks/useProfixio";
-import { getMatchEvents, getMatchLineup } from "../../api/profixioApi";
+import { getMatchEvents, getMatchLineup, getMatchDetails } from "../../api/profixioApi";
 import useAuth from "../../hooks/useAuth";
 
 // --- helpers -------------------------------------------------------------
 
 const normalizeMatches = (raw) => {
   const list = Array.isArray(raw) ? raw : raw?.data || [];
-  return list.map((m) => ({
-    id: m?.id ?? m?.matchId ?? m?.code,
-    home:
-      m?.homeTeamName ?? m?.homeTeam ?? m?.home?.name ?? m?.home ?? "—",
-    away:
-      m?.awayTeamName ?? m?.awayTeam ?? m?.away?.name ?? m?.away ?? "—",
-    result:
-      m?.result ??
-      (m?.homeScore != null && m?.awayScore != null
-        ? `${m.homeScore}-${m.awayScore}`
-        : "—"),
-    date: m?.start ?? m?.date ?? m?.startDate ?? null,
-  }));
+
+  const pickTeamName = (...candidates) => {
+    for (const c of candidates) {
+      if (!c) continue;
+      if (typeof c === 'string' && c.trim()) return c.trim();
+      if (typeof c === 'object') {
+        const v = c?.name || c?.team || c?.teamName || c?.displayName;
+        if (typeof v === 'string' && v.trim()) return v.trim();
+      }
+    }
+    return '—';
+  };
+
+  const readScore = (m, side) => {
+    const s = side; // 'home' | 'away'
+    // 1) direct numeric fields
+    const direct =
+      m?.[`${s}Score`] ?? m?.[`${s}_score`] ??
+      m?.[`${s}Goals`] ?? m?.[`${s}_goals`] ??
+      m?.[`${s}Points`] ?? m?.[`${s}_points`] ??
+      m?.[`${s}Result`] ?? m?.[`${s}_result`] ??
+      m?.[`result_${s}`] ?? m?.[`score_${s}`] ?? m?.[`goals_${s}`];
+    if (typeof direct === 'number') return direct;
+    if (typeof direct === 'string' && direct.trim() && !isNaN(Number(direct))) return Number(direct);
+
+    // 2) nested team object variants
+    const teams = m?.teams || m?.team || {};
+    const sideObj = (s === 'home' ? teams.home : teams.away) || (Array.isArray(teams) ? teams.find(t => (t.side || t.location || '').toString().toLowerCase().includes(s)) : null);
+    const fromSide = sideObj?.goals ?? sideObj?.score ?? sideObj?.points ?? sideObj?.result ?? sideObj?.[`${s}Score`];
+    if (typeof fromSide === 'number') return fromSide;
+    if (typeof fromSide === 'string' && fromSide.trim() && !isNaN(Number(fromSide))) return Number(fromSide);
+
+    // 3) score string like "67-54" or "67–54"
+    const resStr = (m?.result || m?.score || m?.final || '').toString();
+    if (resStr.includes('-') || resStr.includes('–')) {
+      const sep = resStr.includes('–') ? '–' : '-';
+      const [h, a] = resStr.split(sep).map(x => Number(String(x).trim()));
+      if (!Number.isNaN(h) && !Number.isNaN(a)) return s === 'home' ? h : a;
+    }
+
+    // 4) object { home, away }
+    const fromObj = m?.score || m?.scores || m?.resultObj || {};
+    const cand = fromObj?.[s];
+    if (typeof cand === 'number') return cand;
+    if (typeof cand === 'string' && cand.trim() && !isNaN(Number(cand))) return Number(cand);
+
+    return null;
+  };
+
+  return list.map((m) => {
+    const homeName = pickTeamName(m?.homeTeamName, m?.homeTeam, m?.home?.name, m?.home, m?.teams?.home?.team, m?.teams?.home?.name, m?.teams?.home);
+    const awayName = pickTeamName(m?.awayTeamName, m?.awayTeam, m?.away?.name, m?.away, m?.teams?.away?.team, m?.teams?.away?.name, m?.teams?.away);
+
+    const hs = readScore(m, 'home');
+    const as = readScore(m, 'away');
+
+    let result = '—';
+    if (hs != null && as != null) result = `${hs}–${as}`;
+    else if (typeof m?.result === 'string' && m.result.trim()) result = m.result.replace('-', '–');
+    else if (typeof m?.score === 'string' && m.score.trim()) result = m.score.replace('-', '–');
+
+    return {
+      id: m?.id ?? m?.matchId ?? m?.code,
+      home: homeName,
+      away: awayName,
+      result,
+      date: m?.start ?? m?.date ?? m?.startDate ?? m?.gameTime ?? m?.played_at ?? null,
+    };
+  });
 };
 
 const normalizeTeams = (raw) => {
@@ -131,7 +187,8 @@ export default function TournamentDetails() {
   }, [teams]);
 
   useEffect(() => {
-    if (!user?.idToken || !tournamentId || !selected?.id) return;
+    const bearer = user?.accessToken || user?.idToken;
+    if (!bearer || !tournamentId || !selected?.id) return;
 
     let cancelled = false;
     const run = async () => {
@@ -139,8 +196,8 @@ export default function TournamentDetails() {
         setFetchingScorers(true);
 
         const [lineupRes, eventsRes] = await Promise.all([
-          getMatchLineup(tournamentId, selected.id, user.idToken),
-          getMatchEvents(tournamentId, selected.id, user.idToken),
+          getMatchLineup(tournamentId, selected.id, bearer),
+          getMatchEvents(tournamentId, selected.id, bearer),
         ]);
 
         const lineupList = Array.isArray(lineupRes?.data)
@@ -165,7 +222,8 @@ export default function TournamentDetails() {
           : eventsRes || [];
         const tally = new Map();
         events.forEach((ev) => {
-          const pts = getPointsFromEvent(ev);
+          const typeRaw = (ev.type || ev.eventType || ev.event || ev.code || '').toString().toLowerCase();
+          const pts = getPointsFromEvent({ ...ev, type: typeRaw });
           if (!pts) return;
           const pid = ev.playerId || ev.player || ev.globalPlayerId || ev.personId;
           if (pid == null) return;
@@ -211,7 +269,7 @@ export default function TournamentDetails() {
       cancelled = true;
     };
   }, [
-    user?.idToken,
+    user?.accessToken || user?.idToken,
     tournamentId,
     selected?.id,
     selected?.home,
