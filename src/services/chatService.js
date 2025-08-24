@@ -27,7 +27,7 @@ export const joinGroup = (groupId) => {
 
 export const fetchUsers = async () => {
   const token = localStorage.getItem('id_token');
-  const res = await fetch(`${backendUrl}/api/users`, { 
+  const res = await fetch(`${backendUrl}/users`, { 
     headers: { Authorization: `Bearer ${token}` } 
   });
   if (!res.ok) {
@@ -39,7 +39,7 @@ export const fetchUsers = async () => {
 
 export const createGroup = async (name, members) => {
   const token = localStorage.getItem('id_token');
-  const res = await fetch(`${backendUrl}/api/groups`, { 
+  const res = await fetch(`${backendUrl}/groups`, { 
     method: 'POST', 
     headers: { 
       Authorization: `Bearer ${token}`, 
@@ -56,7 +56,7 @@ export const createGroup = async (name, members) => {
 
 export const fetchGroups = async () => {
   const token = localStorage.getItem('id_token');
-  const res = await fetch(`${backendUrl}/api/groups`, { 
+  const res = await fetch(`${backendUrl}/groups`, { 
     headers: { Authorization: `Bearer ${token}` } 
   });
   if (!res.ok) {
