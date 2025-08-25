@@ -397,6 +397,9 @@ export default function TournamentDetails() {
         ),
       ]);
 
+    // Authorization header if we have a bearer from Auth
+    const headers = bearer ? { Authorization: `Bearer ${bearer}` } : {};
+
     // One request that respects 429/Retry-After and supports abort/timeout
     const doRequest = async (url, tries = 3, timeoutMs = 120000) => {
       let lastErr;
@@ -405,7 +408,7 @@ export default function TournamentDetails() {
         try {
           const res = await withTimeout(
             timeoutMs,
-            fetch(url, { credentials: 'include', signal: ctrl.signal }),
+            fetch(url, { credentials: 'omit', headers, signal: ctrl.signal }),
             ctrl
           );
 
@@ -426,7 +429,7 @@ export default function TournamentDetails() {
       }
       if (lastErr) throw lastErr;
       // final attempt
-      return fetch(url, { credentials: 'include' });
+      return fetch(url, { credentials: 'omit', headers });
     };
 
     const safeJson = async (res) => {
@@ -445,7 +448,7 @@ export default function TournamentDetails() {
 
         const base = String(API_BASE).replace(/\/$/, '');
         // More conservative batch sizes to reduce rate-limit/504 risk
-        const limits = [10, 7, 5, 3, 2];
+        const limits = [2, 1];
         let finalItems = [];
         let lastErrorMessage = '';
 
