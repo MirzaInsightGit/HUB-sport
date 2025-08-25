@@ -27,14 +27,14 @@ import SignInCentered from 'views/auth/signIn';
 
 const routes = [
   {
-    name: 'Startsida',
+    name: 'HUB - Stockholm Basket',
     layout: '/admin',
     path: '/default',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <MainDashboard />,
   },
   {
-    name: 'Distrikt',
+    name: 'Anmälan + Distrikt',
     layout: '/admin',
     path: '/distrikt',
     icon: <Icon as={MdDirectionsRun} width="20px" height="20px" color="inherit" />,
@@ -88,7 +88,7 @@ const routes = [
     hidden: true,
   },
   {
-    name: 'Säsonger',
+    name: 'Säsonger - Profixio',
     layout: '/admin',
     path: '/seasons',
     icon: <Icon as={MdTimeline} width="20px" height="20px" color="inherit" />,

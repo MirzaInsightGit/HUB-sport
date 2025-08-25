@@ -370,14 +370,16 @@ const PlayerList = () => {
       <Flex justify='space-between' align='center' mb='4'>
         <Heading size='lg' color={textColor}>Registrerade Spelare till DLT</Heading>
         <Flex>
-          <Button variant='brand' size='sm'>Ni kan endast fylla i läger betyg. </Button>
-          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg Info - Läs mer</Button>
-          <Button size='sm' ml='2' onClick={() => setShowOnlyFavorites(v => !v)}>
+          
+          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg system för spelare</Button>
+          <Button style={{ backgroundColor: 'lightblue' }} size='sm' ml='2' onClick={() => setShowOnlyFavorites(v => !v)}>
             {showOnlyFavorites ? 'Visa alla' : 'Visa favoriter'}
           </Button>
         </Flex>
       </Flex>
-      <Text mb='4' color='secondaryGray.600'>Du ser endast godkända och registrerade spelare, scrolla för att hitta till olika läger.</Text>
+      <Text mb='4' color='secondaryGray.700'>Du ser endast godkända och registrerade spelare, scrolla för att hitta till olika läger. 
+        Du kan endast ge betyg till spelare för det specifika lägret när spelare är anmäld. Osäker? Se BETYG systemet för att kunna klassa spelare med betyg.
+      </Text>
 
       <style>
         {`
@@ -415,7 +417,7 @@ const PlayerList = () => {
           <ModalBody>
             <Text mb="4">
               Ange betyg för varje läger och kategori A-F, där A är högsta betyget.
-              Allt sparas automatiskt i Databasen hos Stockholm Basket.
+              All betyg synkas och räknas ut snittet på spelarens läger status. Grunden är F i betyg. 
             </Text>
             {renderCategoryInfo('Bollkontroll', 'Spelarens teknik med boll, förmåga att hantera press, dribbla med båda händer, samt kontroll under matchtempo. Bedömning grundas på bollsäkerhet, rytm och kreativitet i spelet.')}
             {renderCategoryInfo('Försvar', 'Individens förmåga att hålla sin spelare, förstå rotationsprinciper, sätta press, hjälpa laget och visa fysisk samt mental närvaro i försvarsspelet.')}

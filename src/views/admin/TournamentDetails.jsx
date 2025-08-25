@@ -43,35 +43,10 @@ import {
   getMatchDetails,
   getMatchStats,
 } from "../../api/profixioApi";
+
+import { API_BASE } from "../../config/apiBase";
 import useAuth from "../../hooks/useAuth";
 
-
-/* ---------------- helpers ---------------- */
-
-// ------- API base resolver (single source of truth) -------
-const resolveApiBase = () => {
-  // 1) If a global override is injected (e.g. by the hosting page), prefer it
-  const injected = (typeof window !== 'undefined' && window.__HUB_API_BASE__)
-    ? String(window.__HUB_API_BASE__)
-    : '';
-  if (injected) return injected.replace(/\/$/, '');
-
-  // 2) CRA/Env variables
-  const env = process.env.REACT_APP_API_BASE || '';
-  if (env) return String(env).replace(/\/$/, '');
-
-  // 3) Fallbacks: local dev vs prod (reverse proxy)
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
-    const isLocal = host === 'localhost' || host === '127.0.0.1';
-    // Local should hit the Express server directly under /api
-    // Prod should rely on reverse proxy mounted at /api
-    return isLocal ? 'http://localhost:8080/api' : '/api';
-  }
-  return '/api';
-};
-
-const API_BASE = resolveApiBase();
 
 const normalizeMatches = (raw) => {
   const list = Array.isArray(raw) ? raw : raw?.data || [];
