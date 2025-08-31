@@ -1,6 +1,6 @@
 // src/views/admin/TournamentDetails.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import {
   Box,
   Heading,
@@ -32,6 +32,7 @@ import {
   ModalCloseButton,
   ModalBody,
   ModalFooter,
+  Select,
 } from "@chakra-ui/react";
 import {
   useProfixioTournamentMatches,
@@ -42,10 +43,55 @@ import {
   getMatchLineup,
   getMatchDetails,
   getMatchStats,
+  getTournament,
 } from "../../api/profixioApi";
 
 import { API_BASE } from "../../config/apiBase";
+
 import useAuth from "../../hooks/useAuth";
+
+// ---- Helpers to show "Nivå" (levels) first and sorted naturally ----
+const _normalizeLabel = (s) =>
+  String(s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+// Returns sort key for a category name; "Nivå 1/2A/2B..." first in natural order
+const _levelKey = (name) => {
+  const t = _normalizeLabel(name).toLowerCase();
+  const m = t.match(/niva\s*(\d+)\s*([a-z])?/i);
+  if (!m) return { isLevel: false, n: 0, letter: "" };
+  const n = Number(m[1] || 0);
+  const letter = (m[2] || "").toLowerCase();
+  return { isLevel: true, n, letter };
+};
+
+const sortCategoriesNatural = (a, b) => {
+  const ka = _levelKey(a.name);
+  const kb = _levelKey(b.name);
+  if (ka.isLevel !== kb.isLevel) return ka.isLevel ? -1 : 1; // levels first
+  if (ka.isLevel && kb.isLevel) {
+    if (ka.n !== kb.n) return ka.n - kb.n;
+    // A before B before others
+    if (ka.letter !== kb.letter) return ka.letter.localeCompare(kb.letter, "sv");
+  }
+  return _normalizeLabel(a.name).localeCompare(_normalizeLabel(b.name), "sv");
+};
+
+const dedupeByName = (arr) => {
+  const seen = new Set();
+  const out = [];
+  for (const it of arr) {
+    const key = _normalizeLabel(it.name).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  return out;
+};
+// -------------------------------------------------------------------
 
 
 const normalizeMatches = (raw) => {
@@ -195,7 +241,24 @@ const getPointsFromEvent = (ev) => {
 
 export default function TournamentDetails() {
   const { tournamentId } = useParams();
+  const location = useLocation();
+  // Read initial filter values from URL (?categoryId/groupId or common aliases)
+  const initialQuery = useMemo(() => {
+    const usp = new URLSearchParams(location.search || "");
+    const qCategory = usp.get("categoryId") || usp.get("classId") || usp.get("levelId") || usp.get("category") || usp.get("level");
+    const qGroup = usp.get("groupId") || usp.get("poolId") || usp.get("group") || usp.get("pool");
+    return {
+      categoryId: qCategory != null && qCategory !== "" ? String(qCategory) : null,
+      groupId: qGroup != null && qGroup !== "" ? String(qGroup) : null,
+    };
+  }, [location.search]);
   const { user } = useAuth();
+  // Nivåer (kategorier) & grupper för att kunna filtrera
+  const [taxonomyLoading, setTaxonomyLoading] = useState(false);
+  const [categories, setCategories] = useState([]); // [{id, name}]
+  const [groups, setGroups] = useState([]); // [{id, name}]
+  const [selectedCategoryId, setSelectedCategoryId] = useState(initialQuery.categoryId);
+  const [selectedGroupId, setSelectedGroupId] = useState(initialQuery.groupId);
   // Which tab is active: 0 = Topp 20 spelare, 1 = Lagstatistik, 2 = Enskilda Matcher
   const [tabIndex, setTabIndex] = useState(0);
 
@@ -205,12 +268,127 @@ export default function TournamentDetails() {
     [user?.accessToken, user?.idToken]
   );
 
+  // Hämta taxonomy (nivåer/kategorier + grupper) för turneringen
+  useEffect(() => {
+    let abort = false;
+    const run = async () => {
+      if (!tournamentId) return;
+      setTaxonomyLoading(true);
+      setCategories([]);
+      setGroups([]);
+      try {
+        const base = String(API_BASE).replace(/\/$/, "");
+        const url = `${base}/stats/tournament-taxonomy?tournamentId=${tournamentId}&_=${Date.now()}`;
+        const res = await fetch(url, { credentials: "omit", cache: "no-store" }).catch(() => null);
+        if (!res || !res.ok) throw new Error("taxonomy fetch failed");
+        const json = await res.json().catch(() => ({}));
+        if (abort) return;
+
+        // Accept multiple possible shapes from backend
+        const rawCats =
+          (Array.isArray(json?.categories) && json.categories) ||
+          (Array.isArray(json?.levels) && json.levels) ||
+          (Array.isArray(json?.categoryList) && json.categoryList) ||
+          [];
+        const rawGroups =
+          (Array.isArray(json?.groups) && json.groups) ||
+          (Array.isArray(json?.pools) && json.pools) ||
+          (Array.isArray(json?.groupList) && json.groupList) ||
+          [];
+
+        let cats = rawCats
+          .map((c) => ({
+            id: c.id ?? c.categoryId ?? c.levelId ?? c.code ?? c.value ?? null,
+            name:
+              c.categoryCode ||
+              c.name ||
+              c.title ||
+              c.levelName ||
+              c.label ||
+              String(c.id ?? c.categoryId ?? c.levelId ?? ""),
+          }))
+          .filter((c) => c.id != null);
+        let grps = rawGroups
+          .map((g) => ({
+            id: g.id ?? g.groupId ?? g.poolId ?? g.code ?? g.value ?? null,
+            name: g.name ?? g.title ?? g.poolName ?? g.label ?? String(g.id ?? g.groupId ?? g.poolId ?? ""),
+          }))
+          .filter((g) => g.id != null);
+
+        // Always augment with matchCategories from tournament (helps when taxonomy endpoint is thin)
+        try {
+          const t = await getTournament(tournamentId, bearer).catch(() => null);
+          const mc = Array.isArray(t?.matchCategories) ? t.matchCategories : [];
+          if (mc.length) {
+            const extraCats = mc
+              .map((m) => ({
+                id: m.id ?? m.categoryId ?? null,
+                name: m.categoryCode || m.name || "Kategori",
+              }))
+              .filter((c) => c.id != null);
+            // merge on normalized name or id
+            const seen = new Set(
+              (cats || []).map((c) => `${c.id}|${_normalizeLabel(c.name).toLowerCase()}`)
+            );
+            extraCats.forEach((c) => {
+              const key = `${c.id}|${_normalizeLabel(c.name).toLowerCase()}`;
+              if (!seen.has(key)) {
+                cats.push(c);
+                seen.add(key);
+              }
+            });
+          }
+        } catch (_) {
+          // ignore
+        }
+
+        // Dedupe and sort: levels ("Nivå ...") first in natural order, then others
+        cats = dedupeByName(cats).sort(sortCategoriesNatural);
+        setCategories(cats);
+        setGroups(grps);
+
+        // Välj initial nivå: 1) URL om satt, annars 2) första "Nivå ..." eller första i listan
+        if (!abort) {
+          const urlCat = initialQuery.categoryId;
+          const defCat = cats.find(c => /niv[aå]/i.test(String(c.name||""))) || cats[0];
+          setSelectedCategoryId((prev) => {
+            if (prev != null && prev !== "") return prev;
+            if (urlCat != null && urlCat !== "") return String(urlCat);
+            return defCat ? String(defCat.id) : prev;
+          });
+          // Om grupp i URL är satt men ej finns i listan ännu, behåll värdet; annars nollställ endast om nivå byts i UI senare
+        }
+      } catch (_e) {
+        // mjuk-fail: lämna tomma listor
+      } finally {
+        if (!abort) setTaxonomyLoading(false);
+      }
+    };
+    run();
+    return () => { abort = true; };
+  }, [tournamentId, bearer, initialQuery]);
+
+  // ✨ ADD: tillåt att tvinga maxMatches via querystring vid felsökning
+  const maxMatchesOverride = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const usp = new URLSearchParams(window.location.search);
+    const v = usp.get("maxMatchesOverride");
+    const n = v != null ? Number(v) : null;
+    return n != null && !Number.isNaN(n) && n > 0 ? n : null;
+  }, []); // ✨ ADD
+
   // pagination
   const [page, setPage] = useState(1);
   const limit = 100;
 
   const { data: rawMatches, loading: mLoading } =
-    useProfixioTournamentMatches(tournamentId, { page, limit });
+    useProfixioTournamentMatches(tournamentId, {
+      page,
+      limit,
+      // dessa parametrar ignoreras tyst av hooken om backend inte stödjer dem
+      categoryId: selectedCategoryId || undefined,
+      groupId: selectedGroupId || undefined,
+    });
   const { data: rawTeams, loading: tLoading } =
     useProfixioTournamentTeams(tournamentId, { players: 1 });
 
@@ -252,6 +430,13 @@ export default function TournamentDetails() {
   const [tournamentTopUrl, setTournamentTopUrl] = useState(null);
   // UI: allow manual reload on failure or rate-limit
   const [reloadKey, setReloadKey] = useState(0);
+  // UI helper: smoother loading text while we try backoffs
+  const [fetchStatus, setFetchStatus] = useState("");
+  const [softLoading, setSoftLoading] = useState(false);
+  // Hur många matcher per spelare vi siktar på att summera
+  const [matchDepth, setMatchDepth] = useState(8);
+  // ✨ ADD: spåra vilket maxMatches som faktiskt användes
+  const [usedMaxMatches, setUsedMaxMatches] = useState(null);
   const triggerReload = () => setReloadKey((x) => x + 1);
   // Memoized: combine duplicate players by stable key and compute per-game avg + mix
   const tournamentTopCombined = useMemo(() => {
@@ -260,7 +445,7 @@ export default function TournamentDetails() {
     // Normalize player name to a stable slug without diacritics/punctuation
     const normalizeName = (name) => {
       return String(name || "")
-        .normalize("NFD").replace(/\p{Diacritic}+/gu, "")
+        .normalize("NFD").replace(/[\u0300-\u036f]+/g, "")
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, "")
         .replace(/\s+/g, " ")
@@ -401,14 +586,14 @@ export default function TournamentDetails() {
     const headers = bearer ? { Authorization: `Bearer ${bearer}` } : {};
 
     // One request that respects 429/Retry-After and supports abort/timeout
-    const doRequest = async (url, tries = 3, timeoutMs = 120000) => {
+    const doRequest = async (url, tries = 2, timeoutMs = 15000) => {
       let lastErr;
       for (let i = 0; i < tries; i++) {
         const ctrl = new AbortController();
         try {
           const res = await withTimeout(
             timeoutMs,
-            fetch(url, { credentials: 'omit', headers, signal: ctrl.signal }),
+            fetch(url, { credentials: 'omit', headers, signal: ctrl.signal, cache: 'no-store' }),
             ctrl
           );
 
@@ -429,7 +614,7 @@ export default function TournamentDetails() {
       }
       if (lastErr) throw lastErr;
       // final attempt
-      return fetch(url, { credentials: 'omit', headers });
+      return fetch(url, { credentials: 'omit', headers, cache: 'no-store' });
     };
 
     const safeJson = async (res) => {
@@ -443,26 +628,98 @@ export default function TournamentDetails() {
 
     const run = async () => {
       try {
+        setSoftLoading(true);
+        setFetchStatus("Förbereder hämtning…");
         setTournamentTopLoading(true);
         setTournamentTopError(null);
 
         const base = String(API_BASE).replace(/\/$/, '');
-        // More conservative batch sizes to reduce rate-limit/504 risk
-        const limits = [2, 1];
+        // ✨ CHANGED: limits härleds från matchDepth men stödjer override; vi nollställer även usedMaxMatches före försök
+        const d = Number(matchDepth) || 8;
+        const baseLimitsDesc = Array.from(new Set([
+          d,
+          Math.max(5, Math.ceil(d * 0.7)),
+          Math.max(3, Math.ceil(d * 0.5)),
+          2,
+          1,
+        ])).filter(n => n > 0);
+        // We want to try **smaller first** to return something quickly under poor backends
+        const baseLimitsAsc = [...baseLimitsDesc].sort((a,b) => a - b);
+        // If user has applied filters (category/group), we can start a bit higher but still small
+        const hasFilters = !!(selectedCategoryId || selectedGroupId);
+        const preferredStart = hasFilters ? Math.min(5, d) : Math.min(3, d);
+        const reordered = [preferredStart, ...baseLimitsAsc.filter(x => x !== preferredStart)];
+        const limits = maxMatchesOverride ? [Number(maxMatchesOverride)] : reordered; // ✨ CHANGED
+        setUsedMaxMatches(null); // ✨ ADD
+
         let finalItems = [];
         let lastErrorMessage = '';
 
         for (let i = 0; i < limits.length; i++) {
           const mm = limits[i];
-          const url = `${base}/stats/top-scorers-from-tournament?tournamentId=${tournamentId}&limit=20&maxMatches=${mm}`;
+          setFetchStatus(`Försöker med max ${mm} matcher per spelare…`);
+          // ✨ REPLACED: Build URL with filters, now also passing category/group names for backend compatibility
+          const params = new URLSearchParams({
+            tournamentId: String(tournamentId),
+            limit: "20",
+            maxMatches: String(mm),
+            maxMatchesOverride: String(mm),
+            _: String(Date.now()),
+          });
+
+          // Include both ID and NAME for category/level, to support backends that expect either
+          if (selectedCategoryId != null) {
+            const v = String(selectedCategoryId);
+            params.set("categoryId", v);
+            // aliases some backends use for id
+            params.set("category", v);
+            params.set("levelId", v);
+            params.set("level", v);
+            // also pass the category NAME (code/label) if we can resolve it
+            const selCat = (Array.isArray(categories) ? categories : []).find(
+              (c) => String(c.id) === v
+            );
+            const catName = selCat?.name;
+            if (catName) {
+              params.set("categoryName", catName);
+              params.set("categoryCode", catName);
+              params.set("category_label", catName);
+              params.set("categoryText", catName);
+            }
+          }
+
+          // Include both ID and NAME for group/pool as well
+          if (selectedGroupId != null) {
+            const v = String(selectedGroupId);
+            params.set("groupId", v);
+            // id aliases
+            params.set("group", v);
+            params.set("poolId", v);
+            params.set("pool", v);
+            const selGrp = (Array.isArray(groups) ? groups : []).find(
+              (g) => String(g.id) === v
+            );
+            const grpName = selGrp?.name;
+            if (grpName) {
+              params.set("groupName", grpName);
+              params.set("groupCode", grpName);
+              params.set("poolName", grpName);
+            }
+          }
+          const url = `${base}/stats/top-scorers-from-tournament?${params.toString()}`;
           setTournamentTopUrl(url);
+          if (typeof window !== 'undefined' && (new URLSearchParams(window.location.search).get('debug') === '1')) {
+            // eslint-disable-next-line no-console
+            console.log('[Top20] Request URL:', url);
+          }
 
           try {
-            const res = await doRequest(url, 3, 120000);
+            const res = await doRequest(url, 2, 15000);
             if (!res.ok) {
               // If 504/502, try next smaller batch; otherwise surface the error
               if (res.status === 504 || res.status === 502) {
                 lastErrorMessage = `HTTP ${res.status}`;
+                setFetchStatus(`Servern svarade ${res.status}. Provar lägre värde…`);
                 continue;
               }
               const txt = await res.text().catch(() => '');
@@ -473,9 +730,12 @@ export default function TournamentDetails() {
             const json = await safeJson(res);
             const items = Array.isArray(json?.items) ? json.items : [];
             finalItems = items;
+            setUsedMaxMatches(mm); // ✨ ADD – spara vilket värde som faktiskt lyckades
+            setFetchStatus("");
             break; // success
           } catch (err) {
             // Network error or timeout — try smaller batch
+            setFetchStatus('Nätverksproblem – provar lägre värde…');
             lastErrorMessage = (err?.name === 'AbortError' || /Timeout/i.test(err?.message || ''))
               ? 'Tidsgräns överskreds (servern svarade inte i tid)'
               : (err?.message || 'Okänt fel');
@@ -497,7 +757,11 @@ export default function TournamentDetails() {
           setTournamentTopError(err?.message ? String(err.message) : 'Kunde inte hämta toppscorers.');
         }
       } finally {
-        if (!aborted) setTournamentTopLoading(false);
+        if (!aborted) {
+          setSoftLoading(false);
+          setFetchStatus("");
+          setTournamentTopLoading(false);
+        }
       }
     };
 
@@ -505,7 +769,8 @@ export default function TournamentDetails() {
     return () => {
       aborted = true;
     };
-  }, [tournamentId, reloadKey, tabIndex]);
+  // ✨ CHANGED: lägg till maxMatchesOverride i deps, och filter-deps, samt bearer, categories, groups
+  }, [tournamentId, reloadKey, tabIndex, matchDepth, maxMatchesOverride, selectedCategoryId, selectedGroupId, categories, groups, bearer]);
 
   // Team name -> players[]
   const teamPlayersByName = useMemo(() => {
@@ -795,7 +1060,7 @@ export default function TournamentDetails() {
   if (loading) {
     return (
       <Box p={6} display="flex" alignItems="center" gap={2}>
-        <Spinner /> <Text>Laddar turneringsdata…</Text>
+        <Spinner /> <Text>Laddar turneringsdata och nivåer…</Text>
       </Box>
     );
   }
@@ -819,12 +1084,118 @@ export default function TournamentDetails() {
             <Card variant="outline" borderRadius="lg" mb={4}>
               <CardHeader>
                 <Heading as="h3" size="md">Top 20 poänggörare – turnering</Heading>
-                <Text mt={1} opacity={0.8}>Summerat över alla matcher i turneringen {tournamentId}</Text>
+                <Text mt={1} opacity={0.8}>
+                  Summerat över alla matcher i turneringen {tournamentId}
+                  {selectedCategoryId || selectedGroupId ? (
+                    <>
+                      {" "}• filter: {selectedCategoryId ? `nivå ${categories.find(c => String(c.id) === String(selectedCategoryId))?.name || "—"}` : "alla nivåer"}
+                      {selectedGroupId ? `, grupp ${groups.find(g => String(g.id) === String(selectedGroupId))?.name || "—"}` : ""}
+                    </>
+                  ) : null}
+                </Text>
+                <HStack mt={2} spacing={3}>
+                  <Text fontSize="sm" opacity={0.8}>Matcher per spelare:</Text>
+                  <Select
+                    value={matchDepth}
+                    onChange={(e) => setMatchDepth(Number(e.target.value))}
+                    size="sm"
+                    maxW="88px"
+                    variant="outline"
+                  >
+                    {[3, 5, 8, 10, 12, 15].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </Select>
+                  <Text fontSize="xs" opacity={0.6}>(backar automatiskt vid behov)</Text>
+                </HStack>
+                {/* Filter: nivå (kategori) och grupp */}
+                {(categories.length > 0 || groups.length > 0) && (
+                  <HStack mt={3} spacing={3} flexWrap="wrap">
+                    {categories.length > 0 && (
+                      <HStack>
+                        <Text fontSize="sm" opacity={0.8}>Nivå:</Text>
+                        <Select
+                          value={selectedCategoryId ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setSelectedCategoryId(v === "" ? null : v);
+                            setSelectedGroupId(null); // nollställ grupp när nivå byts
+                          }}
+                          isDisabled={taxonomyLoading}
+                          size="sm"
+                          maxW="220px"
+                          variant="outline"
+                        >
+                          <option value="">Alla</option>
+                          {categories.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </Select>
+                      </HStack>
+                    )}
+                    {groups.length > 0 && (
+                      <HStack>
+                        <Text fontSize="sm" opacity={0.8}>Grupp:</Text>
+                        <Select
+                          value={selectedGroupId ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setSelectedGroupId(v === "" ? null : v);
+                          }}
+                          isDisabled={taxonomyLoading}
+                          size="sm"
+                          maxW="220px"
+                          variant="outline"
+                        >
+                          <option value="">Alla</option>
+                          {groups.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                          ))}
+                        </Select>
+                      </HStack>
+                    )}
+                  </HStack>
+                )}
+                {/* Inline loading text for soft loading */}
+                {softLoading && !tournamentTopError && (
+                  <Text fontSize="xs" opacity={0.6} mt={1}>{fetchStatus || 'Hämtar…'}</Text>
+                )}
+                {/* ✨ ADD: visa om vi föll tillbaka till lägre värde än valt */}
+                {usedMaxMatches != null && usedMaxMatches !== Number(matchDepth) && (
+                  <Text fontSize="xs" opacity={0.6} mt={1}>
+                    Använde <b>{usedMaxMatches}</b> matcher per spelare p.g.a. fallback/prestanda.
+                    {(selectedCategoryId || selectedGroupId) ? " (filtrerat)" : ""}
+                  </Text>
+                )}
               </CardHeader>
               <Divider />
               <CardBody>
                 {tournamentTopLoading ? (
-                  <HStack><Spinner size="sm" /><Text>Hämtar topp 20…</Text></HStack>
+                  <Stack spacing={3}>
+                    {fetchStatus ? <Text fontSize="sm" opacity={0.7}>{fetchStatus}</Text> : <HStack><Spinner size="sm" /><Text>Hämtar topp 20…</Text></HStack>}
+                    <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <Card key={`sk-${i}`} variant="outline">
+                          <CardHeader pb={2}>
+                            <HStack>
+                              <Box w="28px" h="24px" bg="gray.100" _dark={{ bg: 'gray.700' }} borderRadius="md" />
+                              <Box flex="1">
+                                <Box h="12px" bg="gray.100" _dark={{ bg: 'gray.700' }} borderRadius="md" mb={2} />
+                                <Box h="10px" bg="gray.100" _dark={{ bg: 'gray.700' }} borderRadius="md" w="60%" />
+                              </Box>
+                            </HStack>
+                          </CardHeader>
+                          <CardBody pt={0}>
+                            <HStack spacing={2}>
+                              <Box h="20px" w="48px" bg="gray.100" _dark={{ bg: 'gray.700' }} borderRadius="md" />
+                              <Box h="20px" w="68px" bg="gray.100" _dark={{ bg: 'gray.700' }} borderRadius="md" />
+                              <Box h="20px" w="56px" bg="gray.100" _dark={{ bg: 'gray.700' }} borderRadius="md" />
+                            </HStack>
+                          </CardBody>
+                        </Card>
+                      ))}
+                    </SimpleGrid>
+                  </Stack>
                 ) : tournamentTopError ? (
                   <Stack spacing={2}>
                     <Text color="red.500" whiteSpace="normal" wordBreak="break-word">
@@ -833,6 +1204,12 @@ export default function TournamentDetails() {
                     <Text fontSize="xs" opacity={0.6}>
                       Förfrågan: {tournamentTopUrl}
                     </Text>
+                    {/* ✨ ADD: visa senaste försökta maxMatches vid fel */}
+                    {usedMaxMatches != null && (
+                      <Text fontSize="xs" opacity={0.6}>
+                        Senast försökt maxMatches: {usedMaxMatches}
+                      </Text>
+                    )}
                     <HStack>
                       <Button size="sm" onClick={triggerReload}>Försök igen</Button>
                       <Text fontSize="xs" opacity={0.6}>
@@ -866,13 +1243,13 @@ export default function TournamentDetails() {
                         </CardHeader>
                         <CardBody pt={0}>
                           <Stack spacing={2}>
-                            <HStack spacing={2} wrap="wrap">
+                            <HStack spacing={2} flexWrap="wrap">
                               <Tag size="sm"><TagLabel>{Number(p.made3 ?? 0) || 0}×3p</TagLabel></Tag>
                               <Tag size="sm"><TagLabel>{Number(p.made2 ?? 0) || 0}×2p</TagLabel></Tag>
                               <Tag size="sm"><TagLabel>{Number(p.made1 ?? p.ft ?? 0) || 0}×1p</TagLabel></Tag>
                               <Tag size="sm"><TagLabel>Fouls: {Number(p.fouls ?? 0) || 0}</TagLabel></Tag>
                             </HStack>
-                            <HStack spacing={2} wrap="wrap">
+                            <HStack spacing={2} flexWrap="wrap">
                               <Tag size="sm" colorScheme="purple" title="Totalpoäng"><TagLabel>{p.points ?? 0} p totalt</TagLabel></Tag>
                               <Tag size="sm" colorScheme="gray" title="Antal matcher"><TagLabel>{p.matchesCount ?? 0} matcher</TagLabel></Tag>
                               <Tag size="sm" title="Poängmix 3p/2p/1p"><TagLabel>{p.threeShare ?? 0}% • {p.twoShare ?? 0}% • {p.oneShare ?? 0}%</TagLabel></Tag>
@@ -896,8 +1273,8 @@ export default function TournamentDetails() {
               <Text>Inga lag hittades.</Text>
             ) : (
               <Box>
-                {teams.map((t) => (
-                  <Card key={t.id} variant="outline" borderRadius="lg" mb={3}>
+                {teams.map((t, idxTeam) => (
+                  <Card key={`${t.id ?? 'team'}-${idxTeam}`} variant="outline" borderRadius="lg" mb={3}>
                     <CardHeader>
                       <HStack justify="space-between">
                         <Heading as="h4" size="sm">{t.name}</Heading>
@@ -909,8 +1286,8 @@ export default function TournamentDetails() {
                     <CardBody pt={0}>
                       {t.players?.length ? (
                         <Stack spacing={1}>
-                          {t.players.map((p) => (
-                            <HStack key={p?.id || p?.playerId || p?.name} justify="space-between">
+                          {t.players.map((p, idxPlayer) => (
+                             <HStack key={`${p?.id ?? p?.playerId ?? p?.globalPlayerId ?? p?.name ?? 'player'}-${idxPlayer}`} justify="space-between">
                               <HStack>
                                 <Avatar name={p?.name || p?.fullName} size="xs" />
                                 <Text>{p?.name || p?.fullName || "Okänd spelare"}</Text>
@@ -1003,11 +1380,11 @@ export default function TournamentDetails() {
                   </HStack>
 
                   <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={4}>
-                    {matches.map((m) => {
+                    {matches.map((m, idxMatch) => {
                       const isActive = selected?.id?.toString() === m.id?.toString();
                       return (
                         <Card
-                          key={m.id}
+                          key={`${m.id ?? 'match'}-${idxMatch}`}
                           variant={isActive ? "filled" : "outline"}
                           borderRadius="lg"
                           cursor="pointer"
@@ -1074,7 +1451,7 @@ export default function TournamentDetails() {
           <ModalBody>
             {selectedPlayer && (
               <Stack spacing={4}>
-                <HStack spacing={2} wrap="wrap">
+                <HStack spacing={2} flexWrap="wrap">
                   <Tag size="sm"><TagLabel>{Number(selectedPlayer.made3 ?? 0) || 0}×3p</TagLabel></Tag>
                   <Tag size="sm"><TagLabel>{Number(selectedPlayer.made2 ?? 0) || 0}×2p</TagLabel></Tag>
                   <Tag size="sm"><TagLabel>{Number(selectedPlayer.made1 ?? selectedPlayer.ft ?? 0) || 0}×1p</TagLabel></Tag>
@@ -1085,7 +1462,7 @@ export default function TournamentDetails() {
                 {selectedPlayer.periodPoints && Object.keys(selectedPlayer.periodPoints).length ? (
                   <Box>
                     <Text fontWeight="semibold" mb={1}>Poäng per period</Text>
-                    <HStack spacing={2} wrap="wrap">
+                    <HStack spacing={2} flexWrap="wrap">
                       {Object.entries(selectedPlayer.periodPoints).map(([per, val]) => (
                         <Tag key={per} size="sm"><TagLabel>P{per}: {val}</TagLabel></Tag>
                       ))}
@@ -1097,7 +1474,7 @@ export default function TournamentDetails() {
                 {Array.isArray(selectedPlayer.matches) && selectedPlayer.matches.length ? (
                   <Box>
                     <Text fontWeight="semibold" mb={1}>Matcher</Text>
-                    <HStack spacing={2} wrap="wrap">
+                    <HStack spacing={2} flexWrap="wrap">
                       {selectedPlayer.matches.map((mid) => (
                         <Tag key={mid} size="sm" colorScheme="gray"><TagLabel>ID {mid}</TagLabel></Tag>
                       ))}

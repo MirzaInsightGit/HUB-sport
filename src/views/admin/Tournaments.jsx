@@ -31,7 +31,7 @@ import {
   useProfixioTournamentMatches,
   useProfixioTournamentTeams,
 } from "../../hooks/useProfixio";
-import { getMatchEvents, getMatchLineup, getMatchDetails } from "../../api/profixioApi";
+import { getMatchEvents, getMatchLineup } from "../../api/profixioApi";
 import useAuth from "../../hooks/useAuth";
 
 // --- helpers -------------------------------------------------------------
@@ -142,6 +142,12 @@ export default function TournamentDetails() {
   const { tournamentId } = useParams();
   const { user } = useAuth();
 
+  // Stable bearer value for effects
+  const bearer = useMemo(
+    () => user?.accessToken ?? user?.idToken ?? null,
+    [user?.accessToken, user?.idToken]
+  );
+
   // pagination for matches
   const [page, setPage] = useState(1);
   const limit = 15;
@@ -187,8 +193,8 @@ export default function TournamentDetails() {
   }, [teams]);
 
   useEffect(() => {
-    const bearer = user?.accessToken || user?.idToken;
-    if (!bearer || !tournamentId || !selected?.id) return;
+    const token = bearer;
+    if (!token || !tournamentId || !selected?.id) return;
 
     let cancelled = false;
     const run = async () => {
@@ -196,8 +202,8 @@ export default function TournamentDetails() {
         setFetchingScorers(true);
 
         const [lineupRes, eventsRes] = await Promise.all([
-          getMatchLineup(tournamentId, selected.id, bearer),
-          getMatchEvents(tournamentId, selected.id, bearer),
+          getMatchLineup(tournamentId, selected.id, token),
+          getMatchEvents(tournamentId, selected.id, token),
         ]);
 
         const lineupList = Array.isArray(lineupRes?.data)
@@ -269,7 +275,7 @@ export default function TournamentDetails() {
       cancelled = true;
     };
   }, [
-    user?.accessToken || user?.idToken,
+    bearer,
     tournamentId,
     selected?.id,
     selected?.home,
@@ -436,8 +442,7 @@ export default function TournamentDetails() {
                       </CardBody>
                       <CardFooter>
                         <Text fontSize="xs" opacity={0.6}>
-                          Visar högst noterad poäng per lag (beräknad från
-                          matchhändelser).
+                          Visar högst noterad poäng per lag (från matchhändelser eller boxscore).
                         </Text>
                       </CardFooter>
                     </Card>

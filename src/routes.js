@@ -8,7 +8,8 @@ import {
   MdDirectionsRun,
   MdSportsBasketball,
   MdTimeline,
-  MdChat
+  MdChat,
+  MdNotificationsNone,
 } from 'react-icons/md';
 
 // Admin Imports
@@ -22,12 +23,13 @@ import TournamentDetails from 'views/admin/TournamentDetails';
 import Seasons from 'views/admin/Seasons';
 import MatchDetails from 'views/admin/MatchDetails';
 import Chat from "components/Chat";
+import NotificationsAdmin from 'views/admin/notifications/NotificationsAdmin';
 
 import SignInCentered from 'views/auth/signIn';
 
 const routes = [
   {
-    name: 'HUB - Stockholm Basket',
+    name: 'HUB',
     layout: '/admin',
     path: '/default',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
@@ -93,6 +95,13 @@ const routes = [
     path: '/seasons',
     icon: <Icon as={MdTimeline} width="20px" height="20px" color="inherit" />,
     component: <Seasons />,
+  },
+  {
+    name: 'Notiser',
+    layout: '/admin',
+    path: '/notifications',
+    icon: <Icon as={MdNotificationsNone} width="20px" height="20px" color="inherit" />,
+    component: <NotificationsAdmin />,
   },
   {
   name: 'Match Details',

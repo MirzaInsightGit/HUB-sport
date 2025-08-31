@@ -14,18 +14,11 @@ import {
   TagCloseButton,
   Spinner,
   Text,
-  VStack,
   useColorModeValue,
   Button,
   Wrap,
   WrapItem,
-  Accordion,
-  AccordionItem,
-  AccordionButton,
-  AccordionIcon,
-  AccordionPanel,
   Badge,
-  Divider,
   SimpleGrid,
 } from "@chakra-ui/react";
 import {
@@ -100,6 +93,17 @@ const Seasons = () => {
     return Array.from(map, ([value, label]) => ({ value, label }));
   }, [seasonTournaments]);
 
+  // Förval: sätt distrikt till "Stockholms BDF" om inget valts ännu
+  useEffect(() => {
+    if (districtId) return; // användarens val ska respekteras
+    if (!Array.isArray(districtOptions) || districtOptions.length === 0) return;
+    const stock = districtOptions.find((o) => /stockholms\s*bdf/i.test(String(o.label || "")));
+    if (stock && stock.value !== undefined && stock.value !== null) {
+      const val = isNaN(Number(stock.value)) ? stock.value : Number(stock.value);
+      setDistrictId(val);
+    }
+  }, [districtOptions, districtId]);
+
   const divisionOptions = useMemo(() => {
     const map = new Map();
     for (const t of seasonTournaments) {
@@ -111,28 +115,41 @@ const Seasons = () => {
     return Array.from(map, ([value, label]) => ({ value, label }));
   }, [seasonTournaments, districtId]);
 
-  // Helpers för nivåer
-  const normalizeLevel = (s) => {
-    if (!s) return "";
-    const m = String(s).match(/niv[åa]\s*([0-9]+)/i); // fångar "Nivå 1", "Niva 2" etc.
-    return m ? `Nivå ${m[1]}` : "";
-  };
 
   const getLevelsFromTournament = React.useCallback((t) => {
-    // Försök hitta nivå i flera fält
-    const cands = [
-      t?.levelName,        // ev. backend-fält
-      t?.divisionLevel,    // ev. backend-fält
-      t?.divisionName,     // ofta "Nivå X"
-      t?.groupName,        // fallback om grupper innehåller nivå
-      t?.name,             // sista utväg
-    ].filter(Boolean);
-    const levels = new Set();
-    cands.forEach((c) => {
-      const norm = normalizeLevel(c);
-      if (norm) levels.add(norm);
-    });
-    return Array.from(levels);
+    // Try to read explicit Profixio match categories first (fastest & most reliable)
+    // Example shape from API: t.matchCategories = [{ id, name: "Damer U19", categoryCode: "Nivå 1" }, ...]
+    const out = new Set();
+
+    const normalizeLevel = (s) => {
+      if (!s) return "";
+      const m = String(s).match(/niv[åa]\s*([0-9]+)/i); // catches "Nivå 1", "Niva 2" etc.
+      return m ? `Nivå ${m[1]}` : "";
+    };
+
+    const pushMaybe = (val) => {
+      const norm = normalizeLevel(val);
+      if (norm) out.add(norm);
+    };
+
+    // 1) Prefer structured category codes (strict)
+    if (Array.isArray(t?.matchCategories)) {
+      for (const mc of t.matchCategories) {
+        pushMaybe(mc?.categoryCode);
+        pushMaybe(mc?.name);
+      }
+    }
+
+    // 2) Try a few common fields on the tournament object
+    [
+      t?.levelName,      // optional backend field
+      t?.divisionLevel,  // optional backend field
+      t?.divisionName,   // often contains "Nivå X"
+      t?.groupName,      // fallback if groups carry level
+      t?.name,           // last resort: parse from title
+    ].forEach(pushMaybe);
+
+    return Array.from(out);
   }, []);
 
   const levelOptions = useMemo(() => {
@@ -152,6 +169,16 @@ const Seasons = () => {
       return ai - bi || a.value.localeCompare(b.value, "sv");
     });
   }, [seasonTournaments, districtId, divisionId, getLevelsFromTournament]);
+
+  // Förval: sätt nivå till "Nivå 1" om inget valts ännu
+  useEffect(() => {
+    if (level) return; // användarens val ska respekteras
+    if (!Array.isArray(levelOptions) || levelOptions.length === 0) return;
+    const n1 = levelOptions.find((o) => /^niv[åa]\s*1$/i.test(String(o.label || o.value || "")));
+    if (n1) {
+      setLevel(n1.value);
+    }
+  }, [levelOptions, level]);
 
   // Group tournaments by Division (age) and Level ("Nivå X") so it mirrors Profixio layout
   const groupedByDivisionAndLevel = useMemo(() => {

@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/static/css/main.068679a9.css",
-    "main.js": "/static/js/main.74035858.js",
+    "main.js": "/static/js/main.e122f146.js",
     "static/media/Mirza-Omer.JPG": "/static/media/Mirza-Omer.e1534f09054fabcd470e.JPG",
     "static/media/Stockholm-BDF-Gra-Liggande-2.png": "/static/media/Stockholm-BDF-Gra-Liggande-2.e653e84b8c60eda9fc03.png",
     "index.html": "/index.html"
   },
   "entrypoints": [
     "static/css/main.068679a9.css",
-    "static/js/main.74035858.js"
+    "static/js/main.e122f146.js"
   ]
 }

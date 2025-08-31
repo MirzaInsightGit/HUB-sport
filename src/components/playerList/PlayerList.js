@@ -4,7 +4,6 @@ import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import axios from 'axios';
 import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Box, useDisclosure } from "@chakra-ui/react";
-import { CosmosClient } from '@azure/cosmos';
 import { useMsal } from "@azure/msal-react";
 import { API_BASE } from '../../config/apiBase';
 
@@ -32,16 +31,6 @@ const PlayerList = () => {
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const gridRef = useRef();
 
-  const container = useMemo(() => {
-    const endpoint = process.env.REACT_APP_COSMOS_ENDPOINT;
-    const key = process.env.REACT_APP_COSMOS_KEY;
-    if (!endpoint || !key) {
-      console.warn('Cosmos env missing in frontend; skipping Cosmos in PlayerList');
-      return null;
-    }
-    const cosmosClient = new CosmosClient({ endpoint, key });
-    return cosmosClient.database('HUBSportDB').container('Players');
-  }, []);
 
   // ---- Load players + favorites -------------------------------------------------
   const fetchPlayers = useCallback(async () => {
@@ -96,7 +85,7 @@ const PlayerList = () => {
     } catch (error) {
       console.error('Error fetching players:', error.response ? error.response.data : error.message);
     }
-  }, [container, instance, accounts]);
+  }, [instance, accounts]);
 
   useEffect(() => {
     fetchPlayers();
@@ -143,17 +132,24 @@ const PlayerList = () => {
     }
   };
 
-  // ---- Spara rating/kommentar (tills vi flyttar till backend endpoint) ---------
+  // ---- Spara rating/kommentar --------------------------------------------------
   const savePlayerData = async (playerId, data) => {
     try {
-      if (!container) {
-        console.warn('Cosmos not configured; skipping save');
-        return;
-      }
-      const { resource } = await container.items.upsert(data, { partitionKey: playerId });
-      console.log('Saved to Cosmos:', resource);
+      const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
+      const scopes = apiScopeStr
+        ? apiScopeStr.split(',').map(s => s.trim()).filter(Boolean)
+        : [`api://${process.env.REACT_APP_API_CLIENT_ID}/.default`];
+
+      let headers = { 'Content-Type': 'application/json' };
+      try {
+        const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
+        if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
+      } catch (_) { /* fallback dev-mode */ }
+
+      const response = await axios.post(`${API_BASE}/district/players/${playerId}/ratings`, data, { headers });
+      console.log('✔️ Betyg sparat:', response.data);
     } catch (err) {
-      console.error('Error saving to Cosmos:', err.message, err.code);
+      console.error('❌ Kunde inte spara betyg:', err?.response?.data || err.message);
     }
   };
 
