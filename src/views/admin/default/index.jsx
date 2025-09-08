@@ -199,6 +199,25 @@ export default function UserReports() {
       }, 0)
     , 0);
 
+  // ---- WooCommerce pagination helper (fetch all pages) ----
+  const fetchAllOrders = async (params) => {
+    const per_page = 100;
+    let page = 1;
+    let all = [];
+    for (;;) {
+      const { data } = await axios.get(`${API_BASE}/wc/orders`, {
+        params: { ...params, per_page, page },
+      });
+      const batch = Array.isArray(data) ? data : [];
+      all = all.concat(batch);
+      if (batch.length < per_page) break;
+      page += 1;
+      if (page > 50) break; // safety guard
+    }
+    return all;
+  };
+  // --------------------------------------------------------
+
   // ---- Formatting helpers ----
   const fmtInt = (n) => {
     if (n === null || n === undefined || isNaN(Number(n))) return "0";
@@ -221,18 +240,15 @@ export default function UserReports() {
         const dltProductIds = await getDLTProductIds();
 
         // Pull orders for current month and year (completed & processing)
-        const commonParams = { per_page: 100, status: 'completed,processing' };
+        const commonParams = { status: 'completed,processing' };
 
-        const [ordersThisMonthRes, ordersSeasonRes, ordersPrevMonthRes] = await Promise.all([
-          axios.get(`${API_BASE}/wc/orders`, {
-            params: { ...commonParams, after: firstDayMonth.toISOString(), before: lastDayMonth.toISOString() }
-          }),
-          axios.get(`${API_BASE}/wc/orders`, {
-            params: { ...commonParams, after: seasonStart.toISOString(), before: seasonEnd.toISOString() }
-          }),
-          axios.get(`${API_BASE}/wc/orders`, {
-            params: { ...commonParams, after: new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString(), before: new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59).toISOString() }
-          }),
+        const prevStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        const prevEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
+
+        const [ordersThisMonthRaw, ordersSeasonRaw, ordersPrevMonthRaw] = await Promise.all([
+          fetchAllOrders({ ...commonParams, after: firstDayMonth.toISOString(), before: lastDayMonth.toISOString() }),
+          fetchAllOrders({ ...commonParams, after: seasonStart.toISOString(),   before: seasonEnd.toISOString()   }),
+          fetchAllOrders({ ...commonParams, after: prevStart.toISOString(),     before: prevEnd.toISOString()     }),
         ]);
 
         const onlyDLTLineItems = (orders) => {
@@ -242,9 +258,9 @@ export default function UserReports() {
           }).filter(o => (o.line_items || []).length > 0);
         };
 
-        const ordersThisMonth = onlyDLTLineItems(ordersThisMonthRes.data);
-        const ordersSeason = onlyDLTLineItems(ordersSeasonRes.data);
-        const ordersPrevMonth = onlyDLTLineItems(ordersPrevMonthRes.data);
+        const ordersThisMonth = onlyDLTLineItems(ordersThisMonthRaw);
+        const ordersSeason = onlyDLTLineItems(ordersSeasonRaw);
+        const ordersPrevMonth = onlyDLTLineItems(ordersPrevMonthRaw);
 
         // --- Aggregations ---
         const countPlayers = (orders) => orders.reduce((acc, o) => {
