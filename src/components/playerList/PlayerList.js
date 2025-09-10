@@ -108,6 +108,57 @@ const PlayerList = () => {
         if (page > 50) break; // safety guard
       }
 
+      // --- Enrich missing T-shirt sizes from Woo orders (no dedupe changes) ---
+      try {
+        const needsTshirt = (players || []).some(p => !p.tshirt_storlek && !p.tshirt && !p.tshirtSize);
+        if (needsTshirt) {
+          const seasonStart = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z');
+          const seasonEnd   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z');
+
+          // Pull all orders in season
+          const orders = await fetchAllOrders({
+            status: 'completed,processing,on-hold',
+            after: seasonStart.toISOString(),
+            before: seasonEnd.toISOString()
+          });
+
+          // Helpers
+          const flattenAttrs = (items) => (items || []).flatMap(li => Array.isArray(li.attributes) ? li.attributes : []);
+          const findTshirtAttr = (attrs) => {
+            for (const a of attrs) {
+              const name = String(a?.name || '').toLowerCase();
+              if (/t.?shirt|storlek|size/.test(name)) return (a?.option || '').toString().trim();
+            }
+            return '';
+          };
+          const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
+          const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
+
+          // Build lookup maps by email and phone
+          const emailToSize = new Map();
+          const phoneToSize = new Map();
+          for (const o of orders) {
+            const size = getMetaDeep(o, ['dlt_tshirt','dlt_tshirtstorlek','tshirt','t-shirt','t_shirt','storlek','tshirtstorlek']) || findTshirtAttr(flattenAttrs(o.line_items));
+            if (!size) continue;
+            const em = getPlayerEmail(o);
+            const ph = getPlayerPhone(o);
+            if (em) emailToSize.set(em, size);
+            if (ph) phoneToSize.set(ph, size);
+          }
+
+          // Enrich players in-place
+          players = players.map(p => {
+            if (p.tshirt_storlek || p.tshirt || p.tshirtSize) return p;
+            const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
+            const ph = normalizePhone(p.mobilnummer || p.phone);
+            const size = (em && emailToSize.get(em)) || (ph && phoneToSize.get(ph)) || '';
+            return size ? { ...p, tshirt_storlek: size } : p;
+          });
+        }
+      } catch (e) {
+        console.warn('[PlayerList] T-shirt enrichment skipped:', e?.message || e);
+      }
+
       // Fallback/komplettering (AVSTÄNGD som standard):
       // Kör alltid om färre än 130 spelare är laddade.
       if (players.length < 130) {
@@ -149,6 +200,15 @@ const PlayerList = () => {
 
           // Bygg spelarobjekt – BARNETS namn & data från meta, inte föräldrarnas billing
           const derivedPlayers = [];
+          // Helpers to flatten and extract T-shirt size from attributes
+          const flattenAttrs = (items) => (items || []).flatMap(li => Array.isArray(li.attributes) ? li.attributes : []);
+          const findTshirtAttr = (attrs) => {
+            for (const a of attrs) {
+              const name = String(a?.name || '').toLowerCase();
+              if (/t.?shirt|storlek|size/.test(name)) return (a?.option || '').toString().trim();
+            }
+            return '';
+          };
           ordersDLT.forEach(o => {
             const childName = getMetaDeep(o, ['dlt_spelarnamn','spelarnamn','spelarens_namn','barnets_namn']) ||
                               `${o?.billing?.first_name || ''} ${o?.billing?.last_name || ''}`.trim();
@@ -156,15 +216,15 @@ const PlayerList = () => {
             const parentEmail = o?.billing?.email || '';
             const parentPhone = o?.billing?.phone || '';
 
-          const playerEmail = getMetaDeep(o, [
-            'dlt_spelarmejl',
-            'dlt_email',
-            'spelarmejl',
-            'player_email',
-            'spelare_email',
-            'spelarens_email',
-            'spelarens_mejl'
-          ]);
+            const playerEmail = getMetaDeep(o, [
+              'dlt_spelarmejl',
+              'dlt_email',
+              'spelarmejl',
+              'player_email',
+              'spelare_email',
+              'spelarens_email',
+              'spelarens_mejl'
+            ]);
             const konRaw = getMetaDeep(o, ['dlt_kon','kon','gender','kön','barnets_kön']) || '';
             const kon = /kvinna|flicka|female|f/i.test(konRaw) ? 'Kvinna/Flicka' : (/man|pojke|male|m/i.test(konRaw) ? 'Man/Pojke' : '');
             const alderspelare = getMetaDeep(o, ['dlt_alderspelare','fodelsear','födelseår','birthyear']) || '';
@@ -173,7 +233,10 @@ const PlayerList = () => {
             const aktuellserie = getMetaDeep(o, ['dlt_aktuellserie','aktuellserie','serie']) || '';
             const mobilnummer = getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || parentPhone;
             const spelarmejl = playerEmail || '';
-            const tshirt_storlek = getMetaDeep(o, ['dlt_tshirt','tshirt','t-shirt','storlek']) || '';
+            const tshirt_storlek =
+              getMetaDeep(o, ['dlt_tshirt','dlt_tshirtstorlek','tshirt','t-shirt','t_shirt','storlek','tshirtstorlek'])
+              || findTshirtAttr(flattenAttrs(o.line_items))
+              || '';
 
             derivedPlayers.push({
               id: `o_${o.id}`,
@@ -190,7 +253,7 @@ const PlayerList = () => {
               name: parentName,
               email: parentEmail,
               phone: parentPhone,
-              attributes: (o.line_items && o.line_items[0] && o.line_items[0].attributes) || [],
+              attributes: flattenAttrs(o.line_items),
               registeredCamps: [false,false,false,false,false],
               ratings: [{},{},{},{},{}],
               comments: [
@@ -347,12 +410,19 @@ const PlayerList = () => {
         const phoneKey = String(p.mobilnummer || '').replace(/\D+/g, '');
         const yearKey  = String(p.alderspelare || '').trim();
         const nameKey  = (p.spelarnamn || '').toString().trim().toLowerCase();
+        const clubKey  = (p.klubblag || '').toString().trim().toLowerCase();
+        const serieKey = (p.aktuellserie || '').toString().trim().toLowerCase();
 
         let key;
-        if (emailKey)      key = `e:${emailKey}`;                 // 1) unikt på spelarens e-post
-        else if (phoneKey) key = `p:${phoneKey}`;                  // 2) annars telefon (normaliserad)
-        else if (yearKey)  key = `y:${yearKey}|n:${nameKey}`;      // 3) annars år + namn
-        else               key = `n:${nameKey}`;                   // 4) sista utväg
+        if (emailKey) {
+          key = `e:${emailKey}`; // 1) unikt på spelarens e-post
+        } else if (phoneKey) {
+          key = `p:${phoneKey}`; // 2) annars telefon (normaliserad)
+        } else if (yearKey) {
+          key = `y:${yearKey}|n:${nameKey}|k:${clubKey}|s:${serieKey}`; // 3) år + namn + klubb + serie
+        } else {
+          key = `n:${nameKey}|k:${clubKey}|s:${serieKey}`; // 4) namn + klubb + serie
+        }
 
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(p);
@@ -361,6 +431,13 @@ const PlayerList = () => {
       for (const [, arr] of groups.entries()) {
         // välj bästa kandidat i gruppen
         let best = arr[0];
+        // Debug: warn if we merged players without reliable email/phone keys
+        if (arr.length > 1) {
+          const hasReliable = arr.some(x => (x.spelarmejl && x.spelarmejl !== x.email) || String(x.mobilnummer||'').replace(/\D+/g,'').length > 0);
+          if (!hasReliable) {
+            console.warn('[PlayerList] Possible soft-duplicate group merged (no email/phone). Candidates:', arr.map(a => ({ namn:a.spelarnamn, ar:a.alderspelare, klubb:a.klubblag, serie:a.aktuellserie })));
+          }
+        }
         const hasPlayerEmail = (x) => !!(x.spelarmejl && x.spelarmejl !== x.email);
         const hasPhone = (x) => !!normalizePhone(x.mobilnummer);
         for (const x of arr) {
