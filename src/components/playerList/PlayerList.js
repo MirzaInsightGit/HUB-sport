@@ -59,6 +59,7 @@ const categories = ['bollkontroll', 'forsvar', 'anfall', 'kommunikation', 'socia
 
 const categoryTitles = ['Bollkontroll', 'Försvar', 'Anfall', 'Kommunikation', 'Sociala egenskaper', 'Styrka/Kondition', 'Spelförståelse'];
 
+// eslint-disable-next-line no-unused-vars
 // NOTE: används av Azure-registrering (paritet i frontend även om listvyn inte nyttjar den direkt)
 const campProducts = {
   0: 18801, // Läger 1
@@ -155,7 +156,15 @@ const PlayerList = () => {
             const parentEmail = o?.billing?.email || '';
             const parentPhone = o?.billing?.phone || '';
 
-          const playerEmail = getMetaDeep(o, ['spelarmejl','player_email','spelare_email']);
+          const playerEmail = getMetaDeep(o, [
+            'dlt_spelarmejl',
+            'dlt_email',
+            'spelarmejl',
+            'player_email',
+            'spelare_email',
+            'spelarens_email',
+            'spelarens_mejl'
+          ]);
             const konRaw = getMetaDeep(o, ['dlt_kon','kon','gender','kön','barnets_kön']) || '';
             const kon = /kvinna|flicka|female|f/i.test(konRaw) ? 'Kvinna/Flicka' : (/man|pojke|male|m/i.test(konRaw) ? 'Man/Pojke' : '');
             const alderspelare = getMetaDeep(o, ['dlt_alderspelare','fodelsear','födelseår','birthyear']) || '';
@@ -276,7 +285,19 @@ const PlayerList = () => {
         };
 
         // Derivations / fallbacks
-        const spelarmejl = pick(p.spelarmejl, p.playerEmail);
+        const spelarmejl = pick(
+          p.spelarmejl,
+          p.playerEmail,
+          getMetaLocal(p.meta, [
+            'dlt_spelarmejl',
+            'dlt_email',
+            'spelarmejl',
+            'player_email',
+            'spelare_email',
+            'spelarens_email',
+            'spelarens_mejl'
+          ])
+        );
         const mobilnummer = pick(p.mobilnummer, p.phone, p.mobil, p.telefon);
         const tshirt = pick(
           p.tshirt_storlek,
@@ -322,15 +343,17 @@ const PlayerList = () => {
       const richness = (p) => [p.spelarmejl,p.mobilnummer,p.tshirt_storlek,p.klubblag,p.basket_position,p.aktuellserie].filter(x => x && String(x).trim()).length;
       const groups = new Map();
       for (const p of playersWithFav) {
-        const nameKey = norm(p.spelarnamn);
-        const emailKey = norm(p.spelarmejl);
-        const phoneKey = normalizePhone(p.mobilnummer);
-        const yearKey = String(p.alderspelare || '').trim();
+        const emailKey = (p.spelarmejl || '').toString().trim().toLowerCase();
+        const phoneKey = String(p.mobilnummer || '').replace(/\D+/g, '');
+        const yearKey  = String(p.alderspelare || '').trim();
+        const nameKey  = (p.spelarnamn || '').toString().trim().toLowerCase();
+
         let key;
-        if (emailKey) key = `n:${nameKey}|e:${emailKey}`;
-        else if (phoneKey) key = `n:${nameKey}|p:${phoneKey}`;
-        else if (yearKey) key = `n:${nameKey}|y:${yearKey}`;
-        else key = `n:${nameKey}`;
+        if (emailKey)      key = `e:${emailKey}`;                 // 1) unikt på spelarens e-post
+        else if (phoneKey) key = `p:${phoneKey}`;                  // 2) annars telefon (normaliserad)
+        else if (yearKey)  key = `y:${yearKey}|n:${nameKey}`;      // 3) annars år + namn
+        else               key = `n:${nameKey}`;                   // 4) sista utväg
+
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(p);
       }
@@ -435,7 +458,7 @@ const PlayerList = () => {
   };
 
   // ---- Grid handlers ------------------------------------------------------------
-  const onCellValueChanged = async (params) => {
+  const onCellValueChanged = useCallback(async (params) => {
     const campIndex = params.colDef.campIndex;
     const cat = params.colDef.cat;
     let needSave = false;
@@ -481,7 +504,7 @@ const PlayerList = () => {
       };
       await savePlayerData(params.data.id, item);
     }
-  };
+  }, [currentUser, savePlayerData]);
 
   const getRowStyle = (params) => {
     if (params.data.kon === 'Kvinna/Flicka') {
@@ -497,19 +520,19 @@ const PlayerList = () => {
     return map[grade] || 0;
   };
 
-  const calculateAverage = (rating) => {
+  const calculateAverage = useCallback((rating) => {
     const values = categories.map(key => gradeToNumber(rating?.[key] || 'F'));
     const averageNum = (values.reduce((a, b) => a + b, 0) / categories.length);
     return ['A', 'B', 'C', 'D', 'E', 'F'][5 - Math.round(averageNum)];
-  };
+  }, []);
 
-  const ratingAverageRenderer = (params, campIndex) => {
+  const ratingAverageRenderer = useCallback((params, campIndex) => {
     const rating = (params.data?.ratings && params.data.ratings[campIndex]) ? params.data.ratings[campIndex] : {};
     const averageGrade = calculateAverage(rating);
     const by = rating.by ? ` by ${rating.by}` : '';
     const ts = rating.timestamp ? ` at ${new Date(rating.timestamp).toLocaleString()}` : '';
     return averageGrade + ' (genomsnitt)' + by + ts;
-  };
+  }, [calculateAverage]);
 
   const commentsRenderer = (params, campIndex) => {
     const comment = (params.data?.comments && params.data.comments[campIndex])
@@ -526,7 +549,7 @@ const PlayerList = () => {
   };
 
   // ---- Heart cell ---------------------------------------------------------------
-  const HeartCell = (props) => {
+  const HeartCell = useCallback((props) => {
     const isFav = props.data?.isFavorite;
     const onClick = () => toggleFavorite(props.data);
     return (
@@ -534,7 +557,7 @@ const PlayerList = () => {
         {isFav ? '❤️' : '🤍'}
       </span>
     );
-  };
+  }, [toggleFavorite]);
 
   // ---- Column defs --------------------------------------------------------------
   const columnDefs = useMemo(() => [
