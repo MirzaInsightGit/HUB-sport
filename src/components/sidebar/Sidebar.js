@@ -15,6 +15,13 @@ import {
   IconButton,
   Tooltip,
   Text,
+  Button,
+  AlertDialog,
+  AlertDialogOverlay,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogBody,
+  AlertDialogFooter,
 } from "@chakra-ui/react";
 import Content from "components/sidebar/components/Content";
 import {
@@ -27,12 +34,32 @@ import PropTypes from "prop-types";
 
 // Assets
 import { IoMenuOutline } from "react-icons/io5";
-import { MdChevronLeft, MdChevronRight, MdSettings, MdPerson, MdHelpOutline } from "react-icons/md";
+import { MdChevronLeft, MdChevronRight, MdSettings, MdPerson, MdHelpOutline, MdLogout } from "react-icons/md";
 import { NavLink } from "react-router-dom";
+
+import { useMsal } from "@azure/msal-react";
 
 function Sidebar(props) {
   const { routes } = props;
   const filteredRoutes = routes.filter(route => !route.hidden); // Filtrera dolda
+
+  const {
+    isOpen: isLogoutOpen,
+    onOpen: onLogoutOpen,
+    onClose: onLogoutClose
+  } = useDisclosure();
+  const cancelRef = React.useRef();
+
+  const { instance } = useMsal();
+  const handleLogout = async () => {
+    try {
+      await instance.logoutRedirect({
+        postLogoutRedirectUri: "http://hub.mirzamuhic.com",
+      });
+    } catch (e) {
+      console.error("logout error:", e);
+    }
+  };
 
   const [collapsed, setCollapsed] = useState(true);
   // Force collapsed on first mount, then persist user toggles
@@ -96,7 +123,53 @@ function Sidebar(props) {
               {!collapsed && <Text fontSize="sm">Hjälp</Text>}
             </Flex>
           </Tooltip>
+          <Tooltip label="Logga ut" placement="right" isDisabled={!collapsed}>
+            <Flex
+              as="button"
+              onClick={onLogoutOpen}
+              align="center"
+              justify={collapsed ? 'center' : 'flex-start'}
+              gap={3}
+              px={collapsed ? 0 : 2}
+              py={2}
+              borderRadius="md"
+              _hover={{ bg: 'red.500', color: 'white' }}
+              color="red.500"
+              aria-label="Logga ut"
+            >
+              <MdLogout />
+              {!collapsed && <Text fontSize="sm">Logga ut</Text>}
+            </Flex>
+          </Tooltip>
         </Flex>
+        <AlertDialog
+          isOpen={isLogoutOpen}
+          leastDestructiveRef={cancelRef}
+          onClose={onLogoutClose}
+          isCentered
+          motionPreset="slideInBottom"
+        >
+          <AlertDialogOverlay>
+            <AlertDialogContent>
+              <AlertDialogHeader fontSize="lg" fontWeight="bold">
+                Logga ut
+              </AlertDialogHeader>
+
+              <AlertDialogBody>
+                Är du säker på att du vill logga ut?
+              </AlertDialogBody>
+
+              <AlertDialogFooter>
+                <Button ref={cancelRef} onClick={onLogoutClose}>
+                  Avbryt
+                </Button>
+                <Button colorScheme="red" onClick={handleLogout} ml={3}>
+                  Logga ut
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialogOverlay>
+        </AlertDialog>
       </Box>
     </Box>
   );

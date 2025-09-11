@@ -11,6 +11,7 @@ import {
   MdChat,
   MdQueryStats, 
   MdCalendarMonth,
+  MdSettings,
   MdNotificationsNone,
 } from 'react-icons/md';
 
@@ -19,7 +20,7 @@ import MainDashboard from 'views/admin/default';
 import NFTMarketplace from 'views/admin/marketplace';
 import Profile from 'views/admin/profile';
 import StatistikDistrikt from 'views/admin/statistik';
-
+import Settings from "views/admin/settings/Settings";
 import Tournaments from 'views/admin/Tournaments';
 import TournamentDetails from 'views/admin/TournamentDetails';
 import Seasons from 'views/admin/Seasons';
@@ -106,7 +107,7 @@ const routes = [
     icon: <Icon as={MdNotificationsNone} width="20px" height="20px" color="inherit" />,
     component: <NotificationsAdmin />,
     allow: ['admin'], // ⬅️ Endast admin ska se/komma in
-    
+    hidden: true,
   },
   {
   name: 'Match Details',
@@ -131,6 +132,15 @@ const routes = [
   hidden: true,
   allow: ['admin','coach']
   },
+  {
+  name: "Settings",
+  layout: "/admin",
+  path: "/settings",
+  icon: <MdSettings />,
+  component: <Settings />,
+  roles: ["admin"],       // <- endast admin
+  hidden: true,
+}
 ];
 
 export default routes;
