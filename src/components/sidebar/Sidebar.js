@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 
 // chakra imports
 import {
@@ -12,6 +12,9 @@ import {
   useDisclosure,
   DrawerContent,
   DrawerCloseButton,
+  IconButton,
+  Tooltip,
+  Text,
 } from "@chakra-ui/react";
 import Content from "components/sidebar/components/Content";
 import {
@@ -24,10 +27,21 @@ import PropTypes from "prop-types";
 
 // Assets
 import { IoMenuOutline } from "react-icons/io5";
+import { MdChevronLeft, MdChevronRight, MdSettings, MdPerson, MdHelpOutline } from "react-icons/md";
+import { NavLink } from "react-router-dom";
 
 function Sidebar(props) {
   const { routes } = props;
   const filteredRoutes = routes.filter(route => !route.hidden); // Filtrera dolda
+
+  const [collapsed, setCollapsed] = useState(true);
+  // Force collapsed on first mount, then persist user toggles
+  useEffect(() => {
+    localStorage.setItem('sidebar_collapsed', '1');
+  }, []);
+  useEffect(() => {
+    localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0');
+  }, [collapsed]);
 
   let variantChange = "0.2s linear";
   let shadow = useColorModeValue(
@@ -44,19 +58,45 @@ function Sidebar(props) {
       <Box
         bg={sidebarBg}
         transition={variantChange}
-        w='300px'
+        w={collapsed ? '72px' : '300px'}
         h='100vh'
         m={sidebarMargins}
         minH='100%'
         overflowX='hidden'
+        overflow='hidden'
+        display='flex'
+        flexDirection='column'
         boxShadow={shadow}>
-        <Scrollbars
-          autoHide
-          renderTrackVertical={renderTrack}
-          renderThumbVertical={renderThumb}
-          renderView={renderView}>
-          <Content routes={filteredRoutes} /> {/* Använd filtrerad */}
-        </Scrollbars>
+        {/* TOGGLE REMOVED -- Add back here if needed */}
+        <Box flex='1' overflow='hidden'>
+          <Scrollbars
+            autoHide
+            renderTrackVertical={renderTrack}
+            renderThumbVertical={renderThumb}
+            renderView={renderView}>
+            <Content routes={filteredRoutes} collapsed={collapsed} /> {/* Använd filtrerad */}
+          </Scrollbars>
+        </Box>
+        <Flex direction="column" mt="auto" px={collapsed ? 0 : 2} py={3} gap={2}>
+          <Tooltip label="Inställningar" placement="right" isDisabled={!collapsed}>
+            <Flex as={NavLink} to="/admin/settings" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
+              <MdSettings />
+              {!collapsed && <Text fontSize="sm">Inställningar</Text>}
+            </Flex>
+          </Tooltip>
+          <Tooltip label="Mitt konto" placement="right" isDisabled={!collapsed}>
+            <Flex as={NavLink} to="/admin/profile" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
+              <MdPerson />
+              {!collapsed && <Text fontSize="sm">Mitt konto</Text>}
+            </Flex>
+          </Tooltip>
+          <Tooltip label="Hjälp" placement="right" isDisabled={!collapsed}>
+            <Flex as={NavLink} to="/admin/help" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
+              <MdHelpOutline />
+              {!collapsed && <Text fontSize="sm">Hjälp</Text>}
+            </Flex>
+          </Tooltip>
+        </Flex>
       </Box>
     </Box>
   );

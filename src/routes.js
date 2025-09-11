@@ -9,6 +9,8 @@ import {
   MdSportsBasketball,
   MdTimeline,
   MdChat,
+  MdQueryStats, 
+  MdCalendarMonth,
   MdNotificationsNone,
 } from 'react-icons/md';
 
@@ -17,14 +19,14 @@ import MainDashboard from 'views/admin/default';
 import NFTMarketplace from 'views/admin/marketplace';
 import Profile from 'views/admin/profile';
 import StatistikDistrikt from 'views/admin/statistik';
-import RTL from 'views/admin/rtl';
+
 import Tournaments from 'views/admin/Tournaments';
 import TournamentDetails from 'views/admin/TournamentDetails';
 import Seasons from 'views/admin/Seasons';
 import MatchDetails from 'views/admin/MatchDetails';
 import Chat from "components/Chat";
 import NotificationsAdmin from 'views/admin/notifications/NotificationsAdmin';
-
+import SearchResults from "views/admin/search/SearchResults";
 import SignInCentered from 'views/auth/signIn';
 
 const routes = [
@@ -34,6 +36,14 @@ const routes = [
     path: '/default',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <MainDashboard />,
+  },
+  {
+    name: 'HUB',
+    layout: '/coach',
+    path: '/default',
+    icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
+    component: <MainDashboard />,
+    hidden: true,
   },
   {
     name: 'Anmälan + Distrikt',
@@ -66,14 +76,7 @@ const routes = [
     component: <SignInCentered />,
     hidden: true,
   },
-  {
-    name: 'Till Omer',
-    layout: '/rtl',
-    path: '/rtl-default',
-    icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
-    component: <RTL />,
-    hidden: true,
-  },
+  
   {
     name: 'Turneringar',
     layout: '/admin',
@@ -93,7 +96,7 @@ const routes = [
     name: 'Säsonger - Profixio',
     layout: '/admin',
     path: '/seasons',
-    icon: <Icon as={MdTimeline} width="20px" height="20px" color="inherit" />,
+    icon: <Icon as={MdCalendarMonth} width="20px" height="20px" color="inherit" />,
     component: <Seasons />,
   },
   {
@@ -102,6 +105,8 @@ const routes = [
     path: '/notifications',
     icon: <Icon as={MdNotificationsNone} width="20px" height="20px" color="inherit" />,
     component: <NotificationsAdmin />,
+    allow: ['admin'], // ⬅️ Endast admin ska se/komma in
+    
   },
   {
   name: 'Match Details',
@@ -117,6 +122,14 @@ const routes = [
     icon: <Icon as={MdChat} width="20px" height="20px" color="inherit" />,
     component: Chat,
     hidden: true,
+  },
+  {
+  name: 'Sök',
+  layout: '/admin',
+  path: '/search',
+  component: <SearchResults />,
+  hidden: true,
+  allow: ['admin','coach']
   },
 ];
 

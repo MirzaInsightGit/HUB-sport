@@ -6,13 +6,20 @@ import { Flex } from "@chakra-ui/react";
 // Custom components
 import HorizonLogo from "assets/img/Stockholm-BDF-Gra-Liggande-2.png";
 import { HSeparator } from "components/separator/Separator";
+import { MdSportsBasketball } from "react-icons/md";
 
-export function SidebarBrand() {
-  
-
+export function SidebarBrand({ collapsed }) {
   return (
     <Flex align='center' direction='column'>
-      <img src={HorizonLogo} alt="Stockholm Basket Logo" style={{ height: '30px', width: '150px', margin: '32px 0' }} />
+      {!collapsed ? (
+        <Flex align='center' justify='center' h='30px' my='32px'>
+          <MdSportsBasketball size={30} />
+        </Flex>
+      ) : (
+        <Flex align='center' justify='center' h='30px' w='72px' my='32px'>
+          <MdSportsBasketball size={24} />
+        </Flex>
+      )}
       <HSeparator mb='20px' />
     </Flex>
   );

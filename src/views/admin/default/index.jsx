@@ -381,17 +381,17 @@ export default function UserReports() {
       <Card>
         <CardHeader>
           <Text fontSize="xl" fontWeight="bold" color="black">Senaste DLT-anmälningar</Text>
-          <Text fontSize="sm" color="gray.500">Inkl. kolumnen "Anmälan läger datum"</Text>
+          <Text fontSize="sm" color="gray.500">Senaste registreringar i Webbshop"</Text>
         </CardHeader>
         <CardBody>
           <Table size="sm" variant="simple">
             <Thead>
               <Tr>
-                <Th>Order #</Th>
-                <Th>Anmälan läger datum</Th>
-                <Th>Spelare</Th>
+                <Th>Order ID#</Th>
+                <Th>Köpdatum</Th>
+                <Th>Föräldrar</Th>
                 <Th>Kön</Th>
-                <Th>Produkter</Th>
+                <Th>Produkt - Variant</Th>
                 <Th isNumeric>Summa</Th>
               </Tr>
             </Thead>

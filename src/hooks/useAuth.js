@@ -11,8 +11,24 @@ const useAuth = () => {
       if (accounts.length > 0) {
         try {
           const response = await instance.acquireTokenSilent({ scopes: ["User.Read"], account: accounts[0] });
-          const roles = response.idTokenClaims?.roles || [];
-          setUser({ role: roles[0] || "user", idToken: response.idToken, roles });
+          const claims = response.idTokenClaims || {};
+          const roles  = Array.isArray(claims.roles)  ? claims.roles.map(r => String(r).toLowerCase()) : [];
+          const groups = Array.isArray(claims.groups) ? claims.groups : [];
+          const email  = claims.preferred_username || claims.upn || accounts[0]?.username;
+
+          if (process.env.NODE_ENV !== "production") {
+            // Hjälpsam debug i dev-miljö
+            // eslint-disable-next-line no-console
+            console.debug("[useAuth] idTokenClaims:", claims);
+          }
+
+          setUser({
+            role: roles[0] || "user",
+            idToken: response.idToken,
+            roles,
+            groups,
+            email,
+          });
         } catch (e) {
           console.error("Token error:", e);
           await instance.acquireTokenPopup({ scopes: ["User.Read"] });
