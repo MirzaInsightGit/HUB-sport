@@ -282,6 +282,8 @@ export default function TournamentDetails() {
     };
   }, [location.search]);
   const { user } = useAuth();
+  // Tournament meta (serie/klass, säsong, arrangör)
+  const [tournamentInfo, setTournamentInfo] = useState(null);
   // Prewarm cache state (ensure tournament + matches in cache)
   const [warmLoading, setWarmLoading] = useState(false);
   const [warmOk, setWarmOk] = useState(false);
@@ -433,6 +435,15 @@ export default function TournamentDetails() {
               }
             });
           }
+          // Save basic tournament info for header (serie, säsong, arrangör)
+          try {
+            const seriesName = t?.name || t?.tournamentName || t?.competitionName || t?.league || t?.series || null;
+            const season = t?.season || t?.seasonName || t?.seasonYear || t?.year || null;
+            const organiser = t?.organizer || t?.organiser || t?.organization || t?.arranger || t?.host || t?.arr || null;
+            const district = t?.district || t?.region || t?.association || null;
+            const code = t?.code || t?.tournamentCode || null;
+            setTournamentInfo({ seriesName, season, organiser, district, code });
+          } catch {}
         } catch (_) {
           // ignore
         }
@@ -548,7 +559,13 @@ export default function TournamentDetails() {
   const [fetchStatus, setFetchStatus] = useState("");
   const [softLoading, setSoftLoading] = useState(false);
   // Hur många matcher per spelare vi siktar på att summera
-  const [matchDepth, setMatchDepth] = useState(5);
+  const [matchDepth, setMatchDepth] = useState(3);
+
+  // Minimum matcher som krävs för att en spelare ska rankas/visas
+  const [minMatches, setMinMatches] = useState(2);
+
+  // Sorteringsläge för topplistan
+  const [sortMode, setSortMode] = useState('avg'); // 'avg' | 'total' | 'made3' | 'made2' | 'made1' | 'fouls'
 
   // Cache controls (SWR) driven by query params
   const uspCache = useMemo(() => new URLSearchParams(location.search || ''), [location.search]);
@@ -691,6 +708,43 @@ export default function TournamentDetails() {
 
     return arr;
   }, [tournamentTop]);
+  // Endelig lista som visas i UI efter filter (min matcher)
+  const displayedTop = useMemo(() => {
+    const mm = Number(minMatches || 0);
+    if (!Array.isArray(tournamentTopCombined)) return [];
+    return tournamentTopCombined.filter((p) => {
+      const c = Number(p.matchesCount ?? (Array.isArray(p.matches) ? p.matches.length : 0)) || 0;
+      return c >= mm;
+    });
+  }, [tournamentTopCombined, minMatches]);
+
+  // Sortera visningslistan enligt valt läge
+  const sortedTop = useMemo(() => {
+    const arr = Array.isArray(displayedTop) ? [...displayedTop] : [];
+    const by = (k) => (b, a) => (Number(a[k]||0) - Number(b[k]||0)) || String((a.name||'')).localeCompare(String((b.name||'')));
+    switch (sortMode) {
+      case 'total':
+        arr.sort(by('points')); // totalpoäng
+        break;
+      case 'made3':
+        arr.sort(by('made3'));
+        break;
+      case 'made2':
+        arr.sort(by('made2'));
+        break;
+      case 'made1':
+        arr.sort(by('made1'));
+        break;
+      case 'fouls':
+        arr.sort(by('fouls'));
+        break;
+      case 'avg':
+      default:
+        arr.sort(by('avgPoints')); // standard: poäng/sn
+    }
+    return arr;
+  }, [displayedTop, sortMode]);
+
   // UI: player detail modal (from Top 20 list)
   const [selectedPlayer, setSelectedPlayer] = useState(null);
   // Fetch top 20 scorers for the whole tournament (with downshift/backoff to avoid 504/429)
@@ -812,10 +866,7 @@ export default function TournamentDetails() {
           // Build a friendly status string using names instead of IDs
           const catName = categories.find(c => String(c.id) === String(debCat || selectedCategoryId))?.name;
           const grpName = groups.find(g => String(g.id) === String(debGrp || selectedGroupId))?.name;
-          const parts = [`Försöker med max ${mm} matcher per spelare…`];
-          if (debCat || selectedCategoryId) parts.push(`nivå ${catName || 'Alla'}`);
-          if (debGrp || selectedGroupId) parts.push(`grupp ${grpName || 'Alla'}`);
-          setFetchStatus(parts.join(' • '));
+          setFetchStatus(`Försöker med max ${mm} matcher…${catName ? ` • nivå ${catName}` : ''}${grpName ? ` • grupp ${grpName}` : ''}`.trim());
           // ✨ SIMPLIFIED: Build params with debounced category/group
           const params = new URLSearchParams({
             tournamentId: String(tournamentId),
@@ -1192,6 +1243,34 @@ export default function TournamentDetails() {
     );
   }
 
+  // Manual warmup handler for "uppdatera data"
+  const handleWarmup = async () => {
+    if (!tournamentId) return;
+    setWarmLoading(true);
+    setWarmOk(false);
+    try {
+      const { from, to } = warmRange || {};
+      const now = new Date();
+      let f = from, t = to;
+      if (!f || !t) {
+        const year = now.getFullYear();
+        const start = new Date(year - 1, 8, 1);
+        const end = new Date(now.getMonth() > 5 ? year + 1 : year, 5, 30);
+        f = start.toISOString().slice(0, 10);
+        t = end.toISOString().slice(0, 10);
+        setWarmRange({ from: f, to: t });
+      }
+      await ensureTournamentCached(String(tournamentId), { from: f, to: t });
+      setWarmOk(true);
+      setWarmMsg(`Cache klar för ${f} → ${t}`);
+    } catch (e) {
+      setWarmOk(false);
+      setWarmMsg(e?.message || 'Kunde inte värma cache');
+    } finally {
+      setWarmLoading(false);
+    }
+  };
+
   return (
     <Box p={5}>
       {(
@@ -1211,9 +1290,24 @@ export default function TournamentDetails() {
           </CardBody>
         </Card>
       )}
-      <Box display="flex" alignItems="baseline" justifyContent="space-between" mb={4}>
-        <Heading as="h1" size="lg">Turnering {tournamentId}</Heading>
-        <Badge variant="subtle" colorScheme="purple">ID: {tournamentId}</Badge>
+      <Box mb={4}>
+        <Heading as="h1" size="lg">Turnering</Heading>
+        {tournamentInfo && (
+          <HStack spacing={2} mt={2} flexWrap="wrap">
+            {tournamentInfo.seriesName && (
+              <Tag size="sm" colorScheme="purple"><TagLabel>{tournamentInfo.seriesName}</TagLabel></Tag>
+            )}
+            {tournamentInfo.season && (
+              <Tag size="sm" colorScheme="gray"><TagLabel>Säsong {tournamentInfo.season}</TagLabel></Tag>
+            )}
+            {tournamentInfo.organiser && (
+              <Tag size="sm" colorScheme="gray"><TagLabel>Arr: {tournamentInfo.organiser}</TagLabel></Tag>
+            )}
+            {tournamentInfo.district && (
+              <Tag size="sm" colorScheme="gray"><TagLabel>Distrikt: {tournamentInfo.district}</TagLabel></Tag>
+            )}
+          </HStack>
+        )}
       </Box>
 
       <Tabs colorScheme="purple" variant="enclosed" index={DISABLE_OTHER_TABS ? 0 : tabIndex} onChange={DISABLE_OTHER_TABS ? undefined : setTabIndex}>
@@ -1227,12 +1321,12 @@ export default function TournamentDetails() {
             <Card variant="outline" borderRadius="lg" mb={4}>
               <CardHeader>
                 <HStack justify="space-between" align="center">
-                  <Heading as="h3" size="md">Top 20 poänggörare</Heading>
+                  <Heading as="h3" size="md">Top 20 poänggörare – turnering</Heading>
                   <HStack spacing={2} flexWrap="wrap">
-                    <Tag size="sm" colorScheme="purple"><TagLabel>Turnering {tournamentId}</TagLabel></Tag>
                     {warmOk && warmRange?.from && warmRange?.to && (
                       <Tag size="sm" colorScheme="green" variant="subtle"><TagLabel>Cache {warmRange.from}–{warmRange.to}</TagLabel></Tag>
                     )}
+                    <Button size="xs" variant="outline" onClick={handleWarmup} isLoading={warmLoading}>Uppdatera data</Button>
                   </HStack>
                 </HStack>
 
@@ -1259,6 +1353,31 @@ export default function TournamentDetails() {
                         <TagLabel>Fallback: {usedMaxMatches}</TagLabel>
                       </Tag>
                     )}
+                  </HStack>
+                  <HStack spacing={2} ml={{ base: 0, md: 2 }}>
+                    <Text fontSize="sm" opacity={0.8}>Min matcher:</Text>
+                    <Select
+                      value={minMatches}
+                      onChange={(e) => setMinMatches(Number(e.target.value))}
+                      size="sm"
+                      maxW="88px"
+                      variant="outline"
+                    >
+                      {[0,1,2,3,4,5].map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </Select>
+                  </HStack>
+                  <HStack spacing={2} ml={{ base: 0, md: 2 }}>
+                    <Text fontSize="sm" opacity={0.8}>Sortera:</Text>
+                    <Select size="sm" maxW="150px" value={sortMode} onChange={(e)=>setSortMode(e.target.value)}>
+                      <option value="avg">Poäng/sn (standard)</option>
+                      <option value="total">Totalpoäng</option>
+                      <option value="made3">Flest 3-poäng</option>
+                      <option value="made2">Flest 2-poäng</option>
+                      <option value="made1">Flest 1-poäng</option>
+                      <option value="fouls">Mest fouls</option>
+                    </Select>
                   </HStack>
                 </HStack>
 
@@ -1375,7 +1494,7 @@ export default function TournamentDetails() {
                   <Text>Ingen poängdata att visa.</Text>
                 ) : (
                   <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                    {tournamentTopCombined.slice(0, 20).map((p, idx) => (
+                    {sortedTop.slice(0, 20).map((p, idx) => (
                       <Card key={`${p.playerId || p.name}-${idx}`} variant="outline" cursor="pointer" onClick={() => setSelectedPlayer({ ...p, rank: idx + 1 })}>
                         <CardHeader pb={2}>
                           <HStack justify="space-between" align="center">
@@ -1553,7 +1672,6 @@ export default function TournamentDetails() {
                               </CardHeader>
                               <CardBody pt={0}>
                                 <HStack justify="space-between">
-                                  <Tag size="sm" colorScheme="gray">ID {m.id}</Tag>
                                   <Tag
                                     size="sm"
                                     colorScheme={(isActive && selectedScore) || m.result !== "—" ? "purple" : "gray"}
