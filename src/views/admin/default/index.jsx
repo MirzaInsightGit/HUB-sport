@@ -435,7 +435,7 @@ export default function UserReports() {
               }
             />
           }
-          name='Totalt pengar in (DLT)'
+          name='Intjänat in (DLT)'
           value={fmtKr(stats.moneyIn)}
         />
 
