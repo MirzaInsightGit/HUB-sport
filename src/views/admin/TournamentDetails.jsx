@@ -340,6 +340,19 @@ export default function TournamentDetails() {
     }, 400);
     return () => clearTimeout(t);
   }, [selectedCategoryId, selectedGroupId]);
+
+  // Friendly names for current filters (used in UI chips)
+  const selectedCategoryName = useMemo(() => {
+    const id = debCat || selectedCategoryId;
+    const found = categories.find(c => String(c.id) === String(id));
+    return found?.name || null;
+  }, [categories, debCat, selectedCategoryId]);
+
+  const selectedGroupName = useMemo(() => {
+    const id = debGrp || selectedGroupId;
+    const found = groups.find(g => String(g.id) === String(id));
+    return found?.name || null;
+  }, [groups, debGrp, selectedGroupId]);
   // Which tab is active: 0 = Topp 20 spelare, 1 = Lagstatistik, 2 = Enskilda Matcher
   const [tabIndex, setTabIndex] = useState(0);
   const DISABLE_OTHER_TABS = true;
@@ -796,7 +809,13 @@ export default function TournamentDetails() {
         for (let i = 0; i < limits.length; i++) {
           const mm = limits[i];
           setLastTriedMaxMatches(mm);
-          setFetchStatus(`Försöker med max ${mm} matcher per spelare…${debCat ? ' • nivå' : ''}${debCat ? ' ' + debCat : ''}${debGrp ? ' • grupp ' + debGrp : ''}`);
+          // Build a friendly status string using names instead of IDs
+          const catName = categories.find(c => String(c.id) === String(debCat || selectedCategoryId))?.name;
+          const grpName = groups.find(g => String(g.id) === String(debGrp || selectedGroupId))?.name;
+          const parts = [`Försöker med max ${mm} matcher per spelare…`];
+          if (debCat || selectedCategoryId) parts.push(`nivå ${catName || 'Alla'}`);
+          if (debGrp || selectedGroupId) parts.push(`grupp ${grpName || 'Alla'}`);
+          setFetchStatus(parts.join(' • '));
           // ✨ SIMPLIFIED: Build params with debounced category/group
           const params = new URLSearchParams({
             tournamentId: String(tournamentId),
@@ -877,8 +896,8 @@ export default function TournamentDetails() {
     return () => {
       aborted = true;
     };
-  // ✨ CHANGED: lägg till maxMatchesOverride i deps, och filter-deps, samt bearer, debCat, debGrp
-  }, [tournamentId, reloadKey, tabIndex, matchDepth, maxMatchesOverride, debCat, debGrp, bearer, cacheKey, noCache, cacheTtlMs, uspCache]);
+  // ✨ CHANGED: lägg till maxMatchesOverride i deps, och filter-deps, samt bearer, debCat, debGrp, categories, groups, selectedCategoryId, selectedGroupId
+  }, [tournamentId, reloadKey, tabIndex, matchDepth, maxMatchesOverride, debCat, debGrp, bearer, cacheKey, noCache, cacheTtlMs, uspCache, categories, groups, selectedCategoryId, selectedGroupId]);
 
   // Team name -> players[]
   const teamPlayersByName = useMemo(() => {
@@ -1207,43 +1226,54 @@ export default function TournamentDetails() {
           <TabPanel>
             <Card variant="outline" borderRadius="lg" mb={4}>
               <CardHeader>
-                <Heading as="h3" size="md">Top 20 poänggörare – turnering</Heading>
-                <Text mt={1} opacity={0.8}>
-                  Summerat över alla matcher i turneringen {tournamentId}
-                  {selectedCategoryId || selectedGroupId ? (
-                    <>
-                      {" "}• filter: {selectedCategoryId ? `nivå ${categories.find(c => String(c.id) === String(selectedCategoryId))?.name || "—"}` : "alla nivåer"}
-                      {selectedGroupId ? `, grupp ${groups.find(g => String(g.id) === String(selectedGroupId))?.name || "—"}` : ""}
-                    </>
-                  ) : null}
-                </Text>
-                <HStack mt={2} spacing={3}>
-                  <Text fontSize="sm" opacity={0.8}>Matcher per spelare:</Text>
-                  <Select
-                    value={matchDepth}
-                    onChange={(e) => setMatchDepth(Number(e.target.value))}
-                    size="sm"
-                    maxW="88px"
-                    variant="outline"
-                  >
-                    {[3, 5, 8, 10, 12, 15].map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </Select>
-                  <Text fontSize="xs" opacity={0.6}>(skalar ned automatiskt vid behov)</Text>
+                <HStack justify="space-between" align="center">
+                  <Heading as="h3" size="md">Top 20 poänggörare</Heading>
+                  <HStack spacing={2} flexWrap="wrap">
+                    <Tag size="sm" colorScheme="purple"><TagLabel>Turnering {tournamentId}</TagLabel></Tag>
+                    {warmOk && warmRange?.from && warmRange?.to && (
+                      <Tag size="sm" colorScheme="green" variant="subtle"><TagLabel>Cache {warmRange.from}–{warmRange.to}</TagLabel></Tag>
+                    )}
+                  </HStack>
                 </HStack>
-                {/* Filter: nivå (kategori) och grupp */}
+
+                {/* Compact filter chips */}
+                <HStack mt={2} spacing={3} flexWrap="wrap">
+                  <Tag size="sm" colorScheme="gray"><TagLabel>Nivå: {selectedCategoryName || 'Alla'}</TagLabel></Tag>
+                  <Tag size="sm" colorScheme="gray"><TagLabel>Grupp: {selectedGroupName || 'Alla'}</TagLabel></Tag>
+
+                  <HStack spacing={2}>
+                    <Text fontSize="sm" opacity={0.8}>Matcher per spelare:</Text>
+                    <Select
+                      value={matchDepth}
+                      onChange={(e) => setMatchDepth(Number(e.target.value))}
+                      size="sm"
+                      maxW="88px"
+                      variant="outline"
+                    >
+                      {[3, 5, 8, 10, 12, 15].map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </Select>
+                    {usedMaxMatches != null && usedMaxMatches !== Number(matchDepth) && (
+                      <Tag size="sm" colorScheme="purple" variant="subtle">
+                        <TagLabel>Fallback: {usedMaxMatches}</TagLabel>
+                      </Tag>
+                    )}
+                  </HStack>
+                </HStack>
+
+                {/* Selectors for nivå/grupp */}
                 {(categories.length > 0 || groups.length > 0) && (
                   <HStack mt={3} spacing={3} flexWrap="wrap">
                     {categories.length > 0 && (
                       <HStack>
                         <Text fontSize="sm" opacity={0.8}>Nivå:</Text>
                         <Select
-                          value={selectedCategoryId ?? ""}
+                          value={selectedCategoryId ?? ''}
                           onChange={(e) => {
                             const v = e.target.value;
-                            setSelectedCategoryId(v === "" ? null : v);
-                            setSelectedGroupId(null); // nollställ grupp när nivå byts
+                            setSelectedCategoryId(v === '' ? null : v);
+                            setSelectedGroupId(null);
                           }}
                           isDisabled={taxonomyLoading}
                           size="sm"
@@ -1261,10 +1291,10 @@ export default function TournamentDetails() {
                       <HStack>
                         <Text fontSize="sm" opacity={0.8}>Grupp:</Text>
                         <Select
-                          value={selectedGroupId ?? ""}
+                          value={selectedGroupId ?? ''}
                           onChange={(e) => {
                             const v = e.target.value;
-                            setSelectedGroupId(v === "" ? null : v);
+                            setSelectedGroupId(v === '' ? null : v);
                           }}
                           isDisabled={taxonomyLoading}
                           size="sm"
@@ -1280,16 +1310,12 @@ export default function TournamentDetails() {
                     )}
                   </HStack>
                 )}
-                {/* Inline loading text for soft loading */}
+
+                {/* Inline status */}
                 {softLoading && !tournamentTopError && (
-                  <Text fontSize="xs" opacity={0.6} mt={1}>{fetchStatus || 'Hämtar…'}</Text>
-                )}
-                {/* ✨ ADD: visa om vi föll tillbaka till lägre värde än valt */}
-                {usedMaxMatches != null && usedMaxMatches !== Number(matchDepth) && (
-                  <Text fontSize="xs" opacity={0.6} mt={1}>
-                    Använde <b>{usedMaxMatches}</b> matcher per spelare p.g.a. fallback/prestanda.
-                    {(selectedCategoryId || selectedGroupId) ? " (filtrerat)" : ""}
-                  </Text>
+                  <HStack mt={2}>
+                    <Tag size="sm" colorScheme="gray" variant="subtle"><TagLabel>{fetchStatus || 'Uppdaterar…'}</TagLabel></Tag>
+                  </HStack>
                 )}
               </CardHeader>
               <Divider />
