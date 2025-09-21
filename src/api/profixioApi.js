@@ -4,6 +4,7 @@ import { API_BASE } from '../config/apiBase';
 
 // Build backend base from env-aware API_BASE (local/prod)
 const BACKEND_URL = `${API_BASE}/profixio`;
+const CACHE_URL = `${API_BASE}/cache`;
 
 // Helper: headers only when a token is provided (backend may bypass locally)
 const auth = (token) => (token ? { headers: { Authorization: `Bearer ${token}` } } : {});
@@ -12,7 +13,69 @@ const auth = (token) => (token ? { headers: { Authorization: `Bearer ${token}` }
 const withParams = (params = {}, token) => ({ params, ...auth(token) });
 
 // Optional: common axios config (timeouts etc.)
-const http = axios.create({ timeout: 15000 });
+// Slightly higher timeout to tolerate Azure cold starts
+const http = axios.create({ timeout: 30000 });
+
+// Helper: cache-first fetch; falls back to backend if cache misses
+const cacheFirst = async (cachePath, livePath, params = {}, token) => {
+  try {
+    const res = await http.get(`${CACHE_URL}${cachePath}`, withParams(params, token));
+    // For cache endpoints we standardize on { items: [...] } or a plain object
+    // If the cache clearly responded with an empty envelope, treat as miss and fall back
+    const data = res.data;
+    if (data && ((Array.isArray(data.items) && data.items.length) || (Array.isArray(data) && data.length) || (data.id || data.tournamentId || data.profixioId))) {
+      return data;
+    }
+    // Explicit cache miss contract
+    if (data && data.error === 'not found in cache') throw new Error('CACHE_MISS');
+    // If items exists but is empty, consider it a miss for live backfill
+    if (data && Array.isArray(data.items) && data.items.length === 0) throw new Error('CACHE_MISS');
+  } catch (err) {
+    // fall through to live
+  }
+  const resLive = await http.get(`${BACKEND_URL}${livePath}`, withParams(params, token));
+  return resLive.data;
+};
+
+// --- Utilities for TournamentDetails (cache-first UI) ---
+// Admin helper to instruct backend to (re)cache a tournament + matches
+export async function ensureTournamentCached(tournamentId, params = {}, token) {
+  const body = {};
+  if (params.from) body.from = params.from;
+  if (params.to) body.to = params.to;
+  // NOTE: this endpoint is protected server-side; front-end should only call it for admin views
+  const res = await http.post(
+    `${API_BASE}/cache/admin/ensure-tournament/${tournamentId}`,
+    body,
+    auth(token)
+  );
+  return res.data; // { status:"ok", wroteTournament, wroteMatches, totalFetched }
+}
+
+// Helper to derive a sensible default range if none provided
+function defaultRange() {
+  const now = new Date();
+  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const from = new Date(to);
+  from.setMonth(from.getMonth() - 14); // ~14 månader bakåt täcker en hel säsong
+  const iso = (d) => d.toISOString().slice(0, 10);
+  return { from: iso(from), to: iso(to) };
+}
+
+// Fetch tournament + matches from cache in parallel (UI-friendly)
+export async function getTournamentBundleCached(tournamentId, params = {}, token) {
+  const range = { ...defaultRange(), ...params };
+  const [tournament, matchesEnvelope] = await Promise.all([
+    getTournamentFromCache(tournamentId, token),
+    getTournamentMatchesFromCache(tournamentId, range, token),
+  ]);
+  const matches = Array.isArray(matchesEnvelope?.items)
+    ? matchesEnvelope.items
+    : Array.isArray(matchesEnvelope)
+    ? matchesEnvelope
+    : [];
+  return { tournament, matches, range };
+};
 
 export const getUserInfo = async (token) => {
   const res = await http.get(`${BACKEND_URL}/userinfo`, auth(token));
@@ -78,8 +141,24 @@ export const getTournamentTables = async (tournament_id, token) => {
 
 // NOTE: supports pagination with params (e.g., { page, limit })
 export const getTournamentMatches = async (tournament_id, params = {}, token) => {
+  const qp = { ...params };
+  return cacheFirst(
+    `/tournaments/${tournament_id}/matches`,
+    `/tournaments/${tournament_id}/matches`,
+    qp,
+    token
+  );
+};
+
+// Cache-only helpers (no live fallback). Useful inside admin/cache-aware pages
+export const getTournamentFromCache = async (id, token) => {
+  const res = await http.get(`${CACHE_URL}/tournaments/${id}`, auth(token));
+  return res.data;
+};
+
+export const getTournamentMatchesFromCache = async (tournament_id, params = {}, token) => {
   const res = await http.get(
-    `${BACKEND_URL}/tournaments/${tournament_id}/matches`,
+    `${CACHE_URL}/tournaments/${tournament_id}/matches`,
     withParams(params, token)
   );
   return res.data;
@@ -193,8 +272,7 @@ export const getTournamentRankingPoints = async (tournament_id, token) => {
 };
 
 export const getTournament = async (id, token) => {
-  const res = await http.get(`${BACKEND_URL}/tournaments/${id}`, auth(token));
-  return res.data;
+  return cacheFirst(`/tournaments/${id}`, `/tournaments/${id}`, {}, token);
 };
 
 export const getTournamentTeams = async (tournament_id, params = {}, token) => {

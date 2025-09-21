@@ -30,15 +30,31 @@ const ORG_ID = process.env.REACT_APP_PROFIXIO_ORG || "SBBF.SE.BB";
 const TOURNAMENT_ROUTE_BASE = "/admin/tournaments";
 
 /** Länk (piller) till turnering */
-const TournamentLink = ({ t }) => {
+const TournamentLink = ({ t, districtId, divisionId, level }) => {
   const id = t?.id ?? t?.tournamentId ?? t?.code;
   const name = t?.name ?? `Turnering ${id}`;
   if (!id) return null;
+
+  // Bygg URL-parametrar så TournamentDetails kan läsa in rätt nivå och distrikt
+  const params = new URLSearchParams();
+  const catId = districtId || t?.categoryId || t?.category?.id;
+  if (catId != null && catId !== "") params.set("categoryId", String(catId));
+  if (divisionId || t?.divisionId) params.set("divisionId", String(divisionId || t?.divisionId));
+  if (level) {
+    // Skicka både categoryName och alias categoryCode för maximal kompatibilitet
+    params.set("categoryName", String(level));
+    params.set("categoryCode", String(level));
+  }
+  const qs = params.toString();
+  const href = qs
+    ? `${TOURNAMENT_ROUTE_BASE}/${encodeURIComponent(id)}?${qs}`
+    : `${TOURNAMENT_ROUTE_BASE}/${encodeURIComponent(id)}`;
+
   return (
     <WrapItem>
       <Button
         as={Link}
-        to={`${TOURNAMENT_ROUTE_BASE}/${encodeURIComponent(id)}`}
+        to={href}
         size="xs"
         variant="outline"
         borderRadius="full"
@@ -437,7 +453,13 @@ const Seasons = () => {
                       </HStack>
                       <Wrap spacing={2}>
                         {lvl.items.map((t) => (
-                          <TournamentLink key={`pill-${t.id ?? t.code ?? t.name}`} t={t} />
+                          <TournamentLink
+                            key={`pill-${t.id ?? t.code ?? t.name}`}
+                            t={t}
+                            districtId={districtId || t?.categoryId}
+                            divisionId={divisionId || t?.divisionId}
+                            level={lvl.level}
+                          />
                         ))}
                       </Wrap>
                     </Box>
