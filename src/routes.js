@@ -29,22 +29,24 @@ import Chat from "components/Chat";
 import NotificationsAdmin from 'views/admin/notifications/NotificationsAdmin';
 import SearchResults from "views/admin/search/SearchResults";
 import SignInCentered from 'views/auth/signIn';
+import RoleGuard from 'components/auth/RoleGuard';
+
+// -------------------------------------------------------------
+// Route policy
+// - No role specified  => accessible to all authenticated roles
+// - allow: ['admin']   => only admins may access (enforced by RoleGuard)
+// - allow: ['admin','coach'] => admins and coaches
+// Also: sidebar/renderers can hide items based on `allow`/`hidden`.
+// -------------------------------------------------------------
 
 const routes = [
+  // HUB dashboard (visible for all authenticated roles)
   {
     name: 'HUB',
     layout: '/admin',
     path: '/default',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <MainDashboard />,
-  },
-  {
-    name: 'HUB',
-    layout: '/coach',
-    path: '/default',
-    icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
-    component: <MainDashboard />,
-    hidden: true,
   },
   {
     name: 'Anmälan + Distrikt',
@@ -54,6 +56,7 @@ const routes = [
     component: <NFTMarketplace />,
     secondary: true,
   },
+  // visible to all roles
   {
     name: 'Statistik - Distrikt',
     layout: '/admin',
@@ -77,7 +80,7 @@ const routes = [
     component: <SignInCentered />,
     hidden: true,
   },
-  
+  // visible to all roles
   {
     name: 'Turneringar',
     layout: '/admin',
@@ -93,6 +96,7 @@ const routes = [
     component: <TournamentDetails />,
     hidden: true,
   },
+  // visible to all roles
   {
     name: 'Säsonger - Profixio',
     layout: '/admin',
@@ -100,47 +104,66 @@ const routes = [
     icon: <Icon as={MdCalendarMonth} width="20px" height="20px" color="inherit" />,
     component: <Seasons />,
   },
+  // admin-only
   {
     name: 'Notiser',
     layout: '/admin',
     path: '/notifications',
     icon: <Icon as={MdNotificationsNone} width="20px" height="20px" color="inherit" />,
-    component: <NotificationsAdmin />,
+    component: (
+      <RoleGuard allow={['admin']}>
+        <NotificationsAdmin />
+      </RoleGuard>
+    ),
     allow: ['admin'], // ⬅️ Endast admin ska se/komma in
     hidden: true,
   },
   {
-  name: 'Match Details',
-  layout: '/admin',
-  path: '/matches/:tournamentId/:matchId',
-  component: <MatchDetails />,
-  hidden: true,
+    name: 'Match Details',
+    layout: '/admin',
+    path: '/matches/:tournamentId/:matchId',
+    component: <MatchDetails />,
+    hidden: true,
   },
   {
     name: "Chat - Internal",
     layout: "/admin",
     path: "/chat",
     icon: <Icon as={MdChat} width="20px" height="20px" color="inherit" />,
-    component: Chat,
+    component: (
+      <RoleGuard allow={['admin']}>
+        <Chat />
+      </RoleGuard>
+    ),
+    allow: ['admin'],
     hidden: true,
   },
   {
-  name: 'Sök',
-  layout: '/admin',
-  path: '/search',
-  component: <SearchResults />,
-  hidden: true,
-  allow: ['admin','coach']
+    name: 'Sök',
+    layout: '/admin',
+    path: '/search',
+    component: (
+      <RoleGuard allow={['admin','coach']}>
+        <SearchResults />
+      </RoleGuard>
+    ),
+    hidden: true,
+    allow: ['admin','coach']
   },
+  // admin-only
   {
-  name: "Settings",
-  layout: "/admin",
-  path: "/settings",
-  icon: <MdSettings />,
-  component: <Settings />,
-  roles: ["admin"],       // <- endast admin
-  hidden: true,
-}
+    name: "Settings",
+    layout: "/admin",
+    path: "/settings",
+    icon: <MdSettings />,
+    component: (
+      <RoleGuard allow={['admin']}>
+        <Settings />
+      </RoleGuard>
+    ),
+    allow: ['admin'],
+    hidden: true,
+  }
 ];
 
 export default routes;

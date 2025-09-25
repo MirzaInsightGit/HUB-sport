@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { io } from 'socket.io-client';
 
 // === Chat/WebSocket toggle ==============================================
@@ -17,18 +18,17 @@ const SOCKET_URL =
     ? 'http://localhost:8080'
     : 'https://hub.mirzamuhic.com');
 
-// REST-bas för chat-relaterade endpoints (users/groups).
-// Behåll samma logik som tidigare för att inte påverka annan funktionalitet.
-const backendUrl = process.env.NODE_ENV === 'development'
-  ? 'http://localhost:8080'
-  : 'https://hub.mirzamuhic.com';
+// REST-bas för chat-relaterade endpoints (users/groups). Använd axios + global interceptor
+// så rätt token (API access.read) sätts automatiskt.
+const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE)
+  || process.env.REACT_APP_API_BASE
+  || '/api';
 
 // Initiera socket endast om chat är aktiverad. AutoConnect är AV för säkerhets skull
 // (vi ansluter manuellt via connectChat() vid behov).
 let socket = null;
 if (CHAT_ENABLED) {
   socket = io(SOCKET_URL, {
-    auth: { token: localStorage.getItem('id_token') },
     transports: ['websocket'],
     autoConnect: false,
   });
@@ -71,45 +71,16 @@ export const joinGroup = (groupId) => {
 };
 
 export const fetchUsers = async () => {
-  const token = localStorage.getItem('id_token');
-  const res = await fetch(`${backendUrl}/users`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    let errorData = null;
-    try { errorData = await res.json(); } catch {}
-    throw new Error(JSON.stringify(errorData) || 'Failed to fetch users');
-  }
-  return res.json();
+  const { data } = await axios.get(`${API_BASE}/users`);
+  return data;
 };
 
 export const createGroup = async (name, members) => {
-  const token = localStorage.getItem('id_token');
-  const res = await fetch(`${backendUrl}/groups`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ name, members }),
-  });
-  if (!res.ok) {
-    let errorData = null;
-    try { errorData = await res.json(); } catch {}
-    throw new Error(JSON.stringify(errorData) || 'Failed to create group');
-  }
-  return res.json();
+  const { data } = await axios.post(`${API_BASE}/groups`, { name, members });
+  return data;
 };
 
 export const fetchGroups = async () => {
-  const token = localStorage.getItem('id_token');
-  const res = await fetch(`${backendUrl}/groups`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    let errorData = null;
-    try { errorData = await res.json(); } catch {}
-    throw new Error(JSON.stringify(errorData) || 'Failed to fetch groups');
-  }
-  return res.json();
+  const { data } = await axios.get(`${API_BASE}/groups`);
+  return data;
 };

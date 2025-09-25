@@ -1,6 +1,7 @@
 // src/api/profixioApi.js
 import axios from 'axios';
 import { API_BASE } from '../config/apiBase';
+import { pca, loginRequest } from '../authConfig';
 
 // Build backend base from env-aware API_BASE (local/prod)
 const BACKEND_URL = `${API_BASE}/profixio`;
@@ -15,6 +16,29 @@ const withParams = (params = {}, token) => ({ params, ...auth(token) });
 // Optional: common axios config (timeouts etc.)
 // Slightly higher timeout to tolerate Azure cold starts
 const http = axios.create({ timeout: 30000 });
+
+// --- MSAL token helper + axios interceptor ---
+async function ensureAccessToken() {
+  try {
+    const result = await pca.acquireTokenSilent(loginRequest);
+    return result?.accessToken;
+  } catch (e) {
+    // Silent acquisition can fail on first load before an interactive login; fallback to no token
+    return undefined;
+  }
+}
+
+// If no Authorization header was provided by the caller, attach API access-token automatically
+http.interceptors.request.use(async (config) => {
+  if (!config?.headers?.Authorization) {
+    const token = await ensureAccessToken();
+    if (token) {
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
 
 // Helper: cache-first fetch; falls back to backend if cache misses
 const cacheFirst = async (cachePath, livePath, params = {}, token) => {

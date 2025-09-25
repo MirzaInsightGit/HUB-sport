@@ -41,7 +41,12 @@ import { useMsal } from "@azure/msal-react";
 
 function Sidebar(props) {
   const { routes } = props;
-  const filteredRoutes = routes.filter(route => !route.hidden); // Filtrera dolda
+  const { instance } = useMsal();
+  const account = instance.getActiveAccount();
+  const roles = (account && account.idTokenClaims && account.idTokenClaims.roles) ? account.idTokenClaims.roles : [];
+  const canSeeRoute = (route) => !route.hidden && (!route.allow || route.allow.some(r => roles.includes(r)));
+  // Only show routes the current user's roles are allowed to see
+  const filteredRoutes = routes.filter(canSeeRoute);
 
   const {
     isOpen: isLogoutOpen,
@@ -50,7 +55,6 @@ function Sidebar(props) {
   } = useDisclosure();
   const cancelRef = React.useRef();
 
-  const { instance } = useMsal();
   const handleLogout = async () => {
     try {
       await instance.logoutRedirect({
@@ -105,12 +109,14 @@ function Sidebar(props) {
           </Scrollbars>
         </Box>
         <Flex direction="column" mt="auto" px={collapsed ? 0 : 2} py={3} gap={2}>
-          <Tooltip label="Inställningar" placement="right" isDisabled={!collapsed}>
-            <Flex as={NavLink} to="/admin/settings" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
-              <MdSettings />
-              {!collapsed && <Text fontSize="sm">Inställningar</Text>}
-            </Flex>
-          </Tooltip>
+          {roles.includes('admin') && (
+            <Tooltip label="Inställningar" placement="right" isDisabled={!collapsed}>
+              <Flex as={NavLink} to="/admin/settings" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
+                <MdSettings />
+                {!collapsed && <Text fontSize="sm">Inställningar</Text>}
+              </Flex>
+            </Tooltip>
+          )}
           <Tooltip label="Mitt konto" placement="right" isDisabled={!collapsed}>
             <Flex as={NavLink} to="/admin/profile" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
               <MdPerson />
@@ -184,7 +190,12 @@ export function SidebarResponsive(props) {
   const btnRef = React.useRef();
 
   const { routes } = props;
-  const filteredRoutes = routes.filter(route => !route.hidden); // Filtrera dolda
+  const { instance: instanceMobile } = useMsal();
+  const accountMobile = instanceMobile.getActiveAccount();
+  const rolesMobile = (accountMobile && accountMobile.idTokenClaims && accountMobile.idTokenClaims.roles) ? accountMobile.idTokenClaims.roles : [];
+  const canSeeRouteMobile = (route) => !route.hidden && (!route.allow || route.allow.some(r => rolesMobile.includes(r)));
+  // Only show routes the current user's roles are allowed to see
+  const filteredRoutes = routes.filter(canSeeRouteMobile);
 
   return (
     <Flex display={{ sm: "flex", xl: "none" }} alignItems='center'>

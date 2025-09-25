@@ -12,8 +12,9 @@ export const msalConfig = {
   },
 };
 
+// Request token for our backend API (Portal-STHLM-API)
 export const loginRequest = {
-  scopes: ['User.Read', 'User.ReadWrite.All'],
+  scopes: ['api://07f2d268-491d-47fb-9600-ba69d3ab5ce2/access.read'],
 };
 
 export const pca = new PublicClientApplication(msalConfig);
