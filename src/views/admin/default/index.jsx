@@ -20,8 +20,6 @@ import MiniStatistics from "components/card/MiniStatistics";
 import IconBox from "components/icons/IconBox";
 import React, { useState, useEffect } from "react";
 import {
-  MdPaid,
-  MdSavings,
   MdGroups,
   MdEventAvailable,
   MdSportsBasketball,
@@ -223,7 +221,6 @@ export default function UserReports() {
     if (n === null || n === undefined || isNaN(Number(n))) return "0";
     return new Intl.NumberFormat('sv-SE', { maximumFractionDigits: 0 }).format(Number(n));
   };
-  const fmtKr = (n) => `${fmtInt(n)} kr`;
   // ----------------------------
 
   useEffect(() => {
@@ -420,71 +417,35 @@ export default function UserReports() {
 
   return (
     <Box pt={{ base: "130px", md: "80px", xl: "80px" }}>
-      <SimpleGrid
-        columns={{ base: 1, md: 3, xl: 6 }}
-        gap='16px'
-        mb='16px'>
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdPaid} color={brandColor} />
-              }
-            />
-          }
-          name='Intjänat in (DLT)'
-          value={fmtKr(stats.moneyIn)}
+      <SimpleGrid columns={{ base: 1, md: 2, xl: 5 }} gap='16px' mb='16px'>
+        {/* 1: Toppklubbar */}
+        <SmallTopList
+          title="Toppklubbar"
+          items={insights.clubs}
+          icon={MdSportsBasketball}
+          iconBg="linear-gradient(90deg, #E0E7FF 0%, #EEF2FF 100%)"
+          iconColor={brandColor}
+          limit={4}
         />
-
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdSavings} color={brandColor} />
-              }
-            />
-          }
-          name={`Kvar till budget (${DLT_BUDGET.toLocaleString('sv-SE')} kr/år)`}
-          value={<span style={{ color: 'red' }}>{fmtKr(stats.budgetLeft)}</span>}
+        {/* 2: Positioner */}
+        <SmallTopList
+          title="Positioner"
+          items={insights.positions}
+          icon={MdLayers}
+          iconBg="linear-gradient(90deg, #DCFCE7 0%, #ECFDF5 100%)"
+          iconColor={brandColor}
+          limit={4}
         />
-
-        <MiniStatistics 
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdGroups} color={brandColor} />
-              }
-            />
-          }
-          growth={`${stats.growth}%`} 
-          name='Antal anmälda spelare'
-          value={stats.playersTotal} 
+        {/* 3: Födelseår */}
+        <SmallTopList
+          title="Födelseår"
+          items={insights.birthYears}
+          icon={MdCalendarToday}
+          iconBg="linear-gradient(90deg, #FEF9C3 0%, #FFFBEB 100%)"
+          iconColor={brandColor}
+          limit={4}
         />
-
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdGroups} color={brandColor} />
-              }
-            />
-          }
-          name='Totalt anmälda killar'
-          value={stats.boysCount}
-        />
-
+        {/* 4: Antal anmälda spelare */}
         <MiniStatistics
           startContent={
             <IconBox
@@ -494,51 +455,27 @@ export default function UserReports() {
               icon={<Icon w='32px' h='32px' as={MdGroups} color={brandColor} />}
             />
           }
-          name='Totalt anmälda tjejer'
-          value={stats.girlsCount}
+          growth={`${stats.growth}%`}
+          name='Antal anmälda spelare'
+          value={stats.playersTotal}
         />
-
+        {/* 5: Totalt anmälda killar */}
         <MiniStatistics
           startContent={
             <IconBox
               w='56px'
               h='56px'
               bg={boxBg}
-              icon={
-                <Icon w='32px' h='32px' as={MdEventAvailable} color={brandColor} />
-              }
+              icon={<Icon w='32px' h='32px' as={MdGroups} color={brandColor} />}
             />
           }
-          name='Nya anmälningar (denna månad)'
-          value={stats.ordersCount}
+          name='Totalt anmälda killar'
+          value={stats.boysCount}
         />
       </SimpleGrid>
 
-      <SimpleGrid columns={{ base: 1, md: 2, xl: 3, "2xl": 6 }} gap='20px' mb='20px'>
-        <SmallTopList
-          title="Toppklubbar"
-          items={insights.clubs}
-          icon={MdSportsBasketball}
-          iconBg="linear-gradient(90deg, #E0E7FF 0%, #EEF2FF 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
-        <SmallTopList
-          title="Positioner"
-          items={insights.positions}
-          icon={MdLayers}
-          iconBg="linear-gradient(90deg, #DCFCE7 0%, #ECFDF5 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
-        <SmallTopList
-          title="Födelseår"
-          items={insights.birthYears}
-          icon={MdCalendarToday}
-          iconBg="linear-gradient(90deg, #FEF9C3 0%, #FFFBEB 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
+      <SimpleGrid columns={{ base: 1, md: 2, xl: 5 }} gap='16px' mb='16px'>
+        {/* Rad 2: 3 stora rutor + 2 statistik-kort till höger */}
         <SmallTopList
           title="Aktuell serie"
           items={insights.series}
@@ -557,14 +494,35 @@ export default function UserReports() {
         />
         <SmallTopList
           title="Könsfördelning"
-          items={[
-            ["Killar", stats.boysCount],
-            ["Tjejer", stats.girlsCount],
-          ]}
+          items={[["Killar", stats.boysCount],["Tjejer", stats.girlsCount]]}
           icon={MdGroups}
           iconBg="linear-gradient(90deg, #E0E7FF 0%, #EEF2FF 100%)"
           iconColor={brandColor}
           limit={2}
+        />
+        <MiniStatistics
+          startContent={
+            <IconBox
+              w='56px'
+              h='56px'
+              bg={boxBg}
+              icon={<Icon w='32px' h='32px' as={MdGroups} color={brandColor} />}
+            />
+          }
+          name='Totalt anmälda tjejer'
+          value={stats.girlsCount}
+        />
+        <MiniStatistics
+          startContent={
+            <IconBox
+              w='56px'
+              h='56px'
+              bg={boxBg}
+              icon={<Icon w='32px' h='32px' as={MdEventAvailable} color={brandColor} />}
+            />
+          }
+          name='Nya anmälningar (denna månad)'
+          value={stats.ordersCount}
         />
       </SimpleGrid>
 

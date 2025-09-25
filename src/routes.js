@@ -13,6 +13,7 @@ import {
   MdCalendarMonth,
   MdSettings,
   MdNotificationsNone,
+  MdAttachMoney,
 } from 'react-icons/md';
 
 // Admin Imports
@@ -30,6 +31,7 @@ import NotificationsAdmin from 'views/admin/notifications/NotificationsAdmin';
 import SearchResults from "views/admin/search/SearchResults";
 import SignInCentered from 'views/auth/signIn';
 import RoleGuard from 'components/auth/RoleGuard';
+import Economy from 'views/admin/Economy';
 
 // -------------------------------------------------------------
 // Route policy
@@ -151,6 +153,19 @@ const routes = [
     allow: ['admin','coach']
   },
   // admin-only
+  {
+    name: "Ekonomi",
+    layout: "/admin",
+    path: "/economy",
+    icon: <Icon as={MdAttachMoney} width="20px" height="20px" color="inherit" />,
+    component: (
+      <RoleGuard allow={['admin']}>
+        <Economy />
+      </RoleGuard>
+    ),
+    allow: ['admin'],
+    hidden: true,
+  },
   {
     name: "Settings",
     layout: "/admin",

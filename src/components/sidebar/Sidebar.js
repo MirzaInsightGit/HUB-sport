@@ -34,7 +34,7 @@ import PropTypes from "prop-types";
 
 // Assets
 import { IoMenuOutline } from "react-icons/io5";
-import { MdChevronLeft, MdChevronRight, MdSettings, MdPerson, MdHelpOutline, MdLogout } from "react-icons/md";
+import { MdChevronLeft, MdChevronRight, MdSettings, MdPerson, MdHelpOutline, MdLogout, MdAttachMoney } from "react-icons/md";
 import { NavLink } from "react-router-dom";
 
 import { useMsal } from "@azure/msal-react";
@@ -109,6 +109,14 @@ function Sidebar(props) {
           </Scrollbars>
         </Box>
         <Flex direction="column" mt="auto" px={collapsed ? 0 : 2} py={3} gap={2}>
+          {roles.includes('admin') && (
+            <Tooltip label="Ekonomi" placement="right" isDisabled={!collapsed}>
+              <Flex as={NavLink} to="/admin/economy" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
+                <MdAttachMoney />
+                {!collapsed && <Text fontSize="sm">Ekonomi</Text>}
+              </Flex>
+            </Tooltip>
+          )}
           {roles.includes('admin') && (
             <Tooltip label="Inställningar" placement="right" isDisabled={!collapsed}>
               <Flex as={NavLink} to="/admin/settings" align="center" justify={collapsed ? 'center' : 'flex-start'} gap={3} px={collapsed ? 0 : 2} py={2} borderRadius="md" _hover={{ bg: 'blackAlpha.200' }}>
