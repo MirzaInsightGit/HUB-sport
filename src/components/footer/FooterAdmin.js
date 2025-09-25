@@ -38,7 +38,7 @@ export default function Footer() {
         {" "}
         &copy; {1900 + new Date().getYear()}
         <Text as='span' fontWeight='500' ms='4px'>
-          © 2025 Stockholms Basketbollförbund - Powered by
+          Stockholms Basketbollförbund - Powered by
           <Link
             mx='3px'
             color={textColor}

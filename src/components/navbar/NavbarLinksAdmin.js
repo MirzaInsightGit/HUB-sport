@@ -1,6 +1,6 @@
 // Admin notifications dropdown (Navbar right side)
 
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Flex,
@@ -14,41 +14,114 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react";
 import { MdNotificationsNone } from "react-icons/md";
+import { useMsal } from "@azure/msal-react";
 
-/**
- * Props (all optional, safe defaults provided):
- * - notifications: Array<{id:string,title?:string,message?:string}>
- * - receipts: Record<id, true>  (read map)
- * - onToggleRead(id)
- * - onMarkAllRead()
- * - shadow, menuBg, textColor: style overrides
- */
+// LocalStorage keys
+const ADMIN_LS_KEY = "adminNotifications"; // list maintained by admin page
+
 export default function AdminNavbarLinks(props) {
-  const {
-    notifications = [],
-    receipts = {},
-    onToggleRead,
-    onMarkAllRead,
-    shadow,
-    menuBg,
-    textColor,
-  } = props || {};
+  const { instance, accounts } = useMsal();
+  const accountId = accounts?.[0]?.homeAccountId || "anon";
+  const RECEIPTS_KEY = `hub.notifications.receipts.${accountId}`;
 
+  // Chakra defaults (theme aware)
   const textDefault = useColorModeValue("navy.700", "white");
   const menuBgDefault = useColorModeValue("white", "navy.700");
-  const shadowDefault = useColorModeValue("14px 17px 40px 4px rgba(112, 144, 176, 0.08)", "unset");
+  const shadowDefault = useColorModeValue(
+    "14px 17px 40px 4px rgba(112, 144, 176, 0.08)",
+    "unset"
+  );
 
-  const resolvedText = textColor ?? textDefault;
-  const resolvedMenuBg = menuBg ?? menuBgDefault;
-  const resolvedShadow = shadow ?? shadowDefault;
+  // Allow parent to override via props, otherwise use internal state
+  const [internalNotifications, setInternalNotifications] = useState([]);
+  const [internalReceipts, setInternalReceipts] = useState({});
 
-  const unreadCount = notifications.filter((n) => !receipts[n.id]).length;
+  const resolvedText = props.textColor ?? textDefault;
+  const resolvedMenuBg = props.menuBg ?? menuBgDefault;
+  const resolvedShadow = props.shadow ?? shadowDefault;
+
+  const loadFromStorage = useCallback(() => {
+    // Load notifications
+    try {
+      const raw = localStorage.getItem(ADMIN_LS_KEY);
+      const all = raw ? JSON.parse(raw) : [];
+      const published = Array.isArray(all)
+        ? all
+            .filter(
+              (n) => (n.status || "").toString().toLowerCase() === "published"
+            )
+            .sort(
+              (a, b) =>
+                new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+            )
+            .slice(0, 10)
+        : [];
+      setInternalNotifications(published);
+    } catch (e) {
+      console.warn("Kunde inte läsa admin-notiser:", e);
+      setInternalNotifications([]);
+    }
+
+    // Load receipts
+    try {
+      const r = localStorage.getItem(RECEIPTS_KEY);
+      setInternalReceipts(r ? JSON.parse(r) : {});
+    } catch (e) {
+      console.warn("Kunde inte läsa read receipts:", e);
+      setInternalReceipts({});
+    }
+  }, [RECEIPTS_KEY]);
+
+  // Initial + event sync
+  useEffect(() => {
+    loadFromStorage();
+    const onStorage = (e) => {
+      if (e.key === ADMIN_LS_KEY || e.key === RECEIPTS_KEY) loadFromStorage();
+    };
+    const onCustom = () => loadFromStorage();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("hub-notifications-updated", onCustom);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("hub-notifications-updated", onCustom);
+    };
+  }, [loadFromStorage, RECEIPTS_KEY]);
+
+  // Persist receipts when they change (only internal path)
+  useEffect(() => {
+    try {
+      localStorage.setItem(RECEIPTS_KEY, JSON.stringify(internalReceipts));
+    } catch (e) {
+      console.warn("Kunde inte spara read receipts:", e);
+    }
+  }, [RECEIPTS_KEY, internalReceipts]);
+
+  // Decide data source (parent props or internal)
+  const notifications = props.notifications?.length
+    ? props.notifications
+    : internalNotifications;
+  const receipts =
+    props.receipts && Object.keys(props.receipts).length
+      ? props.receipts
+      : internalReceipts;
+
+  const unreadCount = useMemo(
+    () => notifications.filter((n) => !receipts[n.id]).length,
+    [notifications, receipts]
+  );
 
   const markAllRead = () => {
-    if (typeof onMarkAllRead === "function") onMarkAllRead();
+    if (typeof props.onMarkAllRead === "function") return props.onMarkAllRead();
+    setInternalReceipts((prev) => {
+      const next = { ...prev };
+      notifications.forEach((n) => (next[n.id] = true));
+      return next;
+    });
   };
+
   const toggleRead = (id) => {
-    if (typeof onToggleRead === "function") onToggleRead(id);
+    if (typeof props.onToggleRead === "function") return props.onToggleRead(id);
+    setInternalReceipts((prev) => ({ ...prev, [id]: prev[id] ? undefined : true }));
   };
 
   return (
@@ -66,6 +139,7 @@ export default function AdminNavbarLinks(props) {
           display="inline-flex"
           alignItems="center"
           justifyContent="center"
+          onClick={loadFromStorage}
         >
           <IconButton
             aria-label="Notiser"
@@ -79,7 +153,7 @@ export default function AdminNavbarLinks(props) {
             _hover={{ bg: "white", transform: "translateY(-1px)" }}
             _active={{ bg: "white" }}
             _focus={{ boxShadow: "none", bg: "white" }}
-            color={resolvedText}
+            color={props.textColor ?? textDefault}
           />
         </MenuButton>
 
@@ -106,10 +180,10 @@ export default function AdminNavbarLinks(props) {
       </Box>
 
       <MenuList
-        boxShadow={resolvedShadow}
+        boxShadow={props.shadow ?? shadowDefault}
         p="20px"
         borderRadius="20px"
-        bg={resolvedMenuBg}
+        bg={props.menuBg ?? menuBgDefault}
         border="none"
         mt="22px"
         me={{ base: "30px", md: "unset" }}
@@ -117,7 +191,7 @@ export default function AdminNavbarLinks(props) {
         maxW={{ base: "360px", md: "unset" }}
       >
         <Flex w="100%" mb="20px" align="center">
-          <Text fontSize="md" fontWeight="600" color={resolvedText}>
+          <Text fontSize="md" fontWeight="600" color={props.textColor ?? textDefault}>
             Notiser
           </Text>
           <Box
@@ -139,7 +213,7 @@ export default function AdminNavbarLinks(props) {
 
         <Flex flexDirection="column">
           {notifications.length === 0 && (
-            <Text color={resolvedText} fontSize="sm">
+            <Text color={props.textColor ?? textDefault} fontSize="sm">
               Inga publicerade notiser.
             </Text>
           )}
@@ -154,7 +228,7 @@ export default function AdminNavbarLinks(props) {
                 px="0"
                 borderRadius="8px"
                 mb="10px"
-                color={isRead ? "gray.500" : resolvedText}
+                color={isRead ? "gray.500" : props.textColor ?? textDefault}
                 onClick={() => toggleRead(n.id)}
               >
                 <Flex direction="column" w="100%">

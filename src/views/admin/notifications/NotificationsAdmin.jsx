@@ -88,6 +88,12 @@ function getInitialNotifications() {
 
 function saveNotifications(notifications) {
   localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications));
+  // Notify other parts of the app (same tab) that notifications changed
+  try {
+    window.dispatchEvent(new Event('hub-notifications-updated'));
+  } catch (_) {
+    // no-op
+  }
 }
 
 export default function NotificationsAdmin() {
