@@ -167,7 +167,7 @@ export default function Dashboard(props) {
                   <Route path="tournaments/:tournamentId" element={<TournamentDetails />} />
                   <Route path="seasons" element={<Seasons />} />
                   <Route path="notifications" element={<NotificationsAdmin />} />
-                  <Route index element={<Navigate to="/admin/default" replace />} />
+                  <Route index element={<Navigate to="/admin/hub" replace />} />
                 </Routes>
               </Box>
             ) : null}

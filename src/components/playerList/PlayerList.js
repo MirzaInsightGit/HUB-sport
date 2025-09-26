@@ -7,6 +7,29 @@ import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverl
 import { useMsal } from "@azure/msal-react";
 import { API_BASE } from '../../config/apiBase';
 
+// --- Local session cache helpers (JS) -----------------------------------------
+const __CACHE_NS = 'hub-cache.v1';
+const makeKey = (key, coachId, tenantId = 'single') => `${__CACHE_NS}::${tenantId}::${coachId || 'anon'}::${key}`;
+const getCache = (fullKey) => {
+  try {
+    const raw = sessionStorage.getItem(fullKey);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (!entry || typeof entry !== 'object') return null;
+    const { ts, ttl, data } = entry;
+    if (!ts || typeof ttl !== 'number') return null;
+    if (Date.now() - ts > ttl) {
+      sessionStorage.removeItem(fullKey);
+      return null;
+    }
+    return data;
+  } catch { return null; }
+};
+const setCache = (fullKey, data, ttlMs) => {
+  try { sessionStorage.setItem(fullKey, JSON.stringify({ ts: Date.now(), ttl: ttlMs, data })); } catch {}
+};
+// -----------------------------------------------------------------------------
+
 // ---- Helpers: fetch all WC orders + read meta --------------------------------
 const fetchAllOrders = async (params = {}) => {
   const per_page = 100;
@@ -105,8 +128,9 @@ const PlayerList = () => {
 
   // Persistenta kolumnval per coach
   const coachId = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+  const tenantId = process.env.REACT_APP_TENANT_ID || 'single';
   const COL_KEY = `playerlist.columns.v1::${coachId}`;
-  const CACHE_KEY = `playerlist.cache.v1::${coachId}`;
+  const CACHE_KEY = makeKey('playerlist', coachId, tenantId);
   const [colVisibility, setColVisibility] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(COL_KEY) || 'null');
@@ -133,16 +157,13 @@ const PlayerList = () => {
     try {
       setIsLoading(true);
       setLoadedCount(0);
-      // Session-cache för snabb navigering utan omladdning
-      try {
-        const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
-        if (cached && Array.isArray(cached.rows) && cached.rows.length > 0) {
-          setRowData(cached.rows);
-          setIsLoading(false);
-          // Fortsätt inte hämta om cache finns – snabb återkomst
-          return;
-        }
-      } catch (_) {}
+      // Session-cache via utility (per coach + tenant)
+      const cached = getCache(CACHE_KEY);
+      if (cached && Array.isArray(cached.rows) && cached.rows.length > 0) {
+        setRowData(cached.rows);
+        setIsLoading(false);
+        return; // snabb återkomst
+      }
       // Backend ger redan ihopslagna spelare (Woo + Cosmos ratings)
       // Hämta alla sidor om backend paginerar (per_page=100)
       let page = 1;
@@ -512,9 +533,7 @@ const PlayerList = () => {
         deduped.push(best);
       }
       console.log('[PlayerList] deduped count:', { before: playersWithFav.length, after: deduped.length });
-      try {
-        sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), rows: deduped }));
-      } catch (_) {}
+      setCache(CACHE_KEY, { rows: deduped }, 10 * 60 * 1000); // 10 min TTL
       setRowData(deduped);
       setIsLoading(false);
     } catch (error) {

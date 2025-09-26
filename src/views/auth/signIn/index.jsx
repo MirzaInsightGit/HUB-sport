@@ -14,7 +14,7 @@ const SignIn = () => {
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate('/admin/default');
+      navigate('/admin/hub');
     }
   }, [isAuthenticated, navigate]);
 

@@ -14,11 +14,13 @@ import {
   Card,
   CardHeader,
   CardBody,
+  Button,
 } from "@chakra-ui/react";
 // Custom components
 import MiniStatistics from "components/card/MiniStatistics";
 import IconBox from "components/icons/IconBox";
 import React, { useState, useEffect } from "react";
+import { useMsal } from "@azure/msal-react";
 import {
   MdGroups,
   MdEventAvailable,
@@ -32,6 +34,29 @@ import {
 import axios from "axios";
 import { API_BASE } from "../../../config/apiBase";
 
+// --- Local session cache helpers (JS) -----------------------------------------
+const __CACHE_NS = 'hub-cache.v1';
+const makeKey = (key, coachId, tenantId = 'single') => `${__CACHE_NS}::${tenantId}::${coachId || 'anon'}::${key}`;
+const getCache = (fullKey) => {
+  try {
+    const raw = sessionStorage.getItem(fullKey);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (!entry || typeof entry !== 'object') return null;
+    const { ts, ttl, data } = entry;
+    if (!ts || typeof ttl !== 'number') return null;
+    if (Date.now() - ts > ttl) {
+      sessionStorage.removeItem(fullKey);
+      return null;
+    }
+    return data;
+  } catch { return null; }
+};
+const setCache = (fullKey, data, ttlMs) => {
+  try { sessionStorage.setItem(fullKey, JSON.stringify({ ts: Date.now(), ttl: ttlMs, data })); } catch {}
+};
+// -----------------------------------------------------------------------------
+
 // DLT config via env (fallbacks)
 const DLT_BUDGET = Number(process.env.REACT_APP_DLT_BUDGET) || 250000;
 const DLT_CATEGORY_ID = process.env.REACT_APP_DLT_CATEGORY_ID || 'dlt'; // WooCommerce category slug/ID for DLT
@@ -44,6 +69,15 @@ export default function UserReports() {
   // Chakra Color Mode
   const brandColor = useColorModeValue("brand.500", "white");
   const boxBg = useColorModeValue("secondaryGray.300", "whiteAlpha.100");
+
+  const { accounts } = useMsal();
+  const coachId = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+  const tenantId = process.env.REACT_APP_TENANT_ID || 'single';
+  const KEY_AGG   = makeKey('dashboard/aggregates', coachId, tenantId);
+  const KEY_MONTH = makeKey('dashboard/monthly', coachId, tenantId);
+  const KEY_WEEK  = makeKey('dashboard/weekly', coachId, tenantId);
+  const KEY_LATEST= makeKey('dashboard/latest', coachId, tenantId);
+  const KEY_INS   = makeKey('dashboard/insights', coachId, tenantId);
 
   const [stats, setStats] = useState({
     moneyIn: 0,          // Totalt pengar in (DLT)
@@ -224,6 +258,19 @@ export default function UserReports() {
   // ----------------------------
 
   useEffect(() => {
+    // Prime state from cache for instant paint
+    try {
+      const cAgg = getCache(KEY_AGG);
+      if (cAgg) setStats(cAgg);
+      const cMon = getCache(KEY_MONTH);
+      if (cMon) setMonthlyData(cMon);
+      const cWeek = getCache(KEY_WEEK);
+      if (cWeek) setWeeklyData(cWeek);
+      const cLatest = getCache(KEY_LATEST);
+      if (cLatest) setLatestOrders(cLatest);
+      const cIns = getCache(KEY_INS);
+      if (cIns) setInsights(cIns);
+    } catch {}
     const fetchData = async () => {
       try {
         const today = new Date();
@@ -329,6 +376,20 @@ export default function UserReports() {
         const tshirts = tallyByMeta(ordersSeason, ["dlt_tshirt", "tshirt", "t-shirt", "storlek"]);
         const products = tallyByProduct(ordersSeason);
         setInsights({ clubs, positions, birthYears, series, tshirts, products });
+        // ---- Cache writes ----
+        setCache(KEY_AGG, {
+          moneyIn: moneyInSeason,
+          budgetLeft: budgetLeft,
+          playersTotal: playersSeason,
+          boysCount: boys,
+          girlsCount: girls,
+          ordersCount: ordersThisMonth.length,
+          growth
+        }, 10 * 60 * 1000);
+        setCache(KEY_MONTH, monthly.sort((a, b) => new Date(a.date) - new Date(b.date)), 5 * 60 * 1000);
+        setCache(KEY_WEEK, weekly.sort((a, b) => a.day - b.day), 5 * 60 * 1000);
+        setCache(KEY_LATEST, ordersThisMonth.sort((a, b) => new Date(b.date_created) - new Date(a.date_created)), 3 * 60 * 1000);
+        setCache(KEY_INS, { clubs, positions, birthYears, series, tshirts, products }, 10 * 60 * 1000);
       } catch (err) {
         console.error('Failed to load DLT dashboard stats:', err);
       }
@@ -417,6 +478,81 @@ export default function UserReports() {
 
   return (
     <Box pt={{ base: "130px", md: "80px", xl: "80px" }}>
+      <Flex justify="flex-end" mb="8px">
+        <Button size="sm" variant="outline" onClick={() => {
+          try {
+            [KEY_AGG, KEY_MONTH, KEY_WEEK, KEY_LATEST, KEY_INS].forEach(k => sessionStorage.removeItem(k));
+          } catch {}
+          // Re-run fetch
+          (async () => {
+            try {
+              const today = new Date();
+              const seasonStart = DLT_SEASON_START;
+              const seasonEnd = DLT_SEASON_END;
+              const firstDayMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+              const lastDayMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59);
+              const dltProductIds = await getDLTProductIds();
+              const commonParams = { status: 'completed,processing' };
+              const prevStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+              const prevEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
+              const [ordersThisMonthRaw, ordersSeasonRaw, ordersPrevMonthRaw] = await Promise.all([
+                fetchAllOrders({ ...commonParams, after: firstDayMonth.toISOString(), before: lastDayMonth.toISOString() }),
+                fetchAllOrders({ ...commonParams, after: seasonStart.toISOString(),   before: seasonEnd.toISOString()   }),
+                fetchAllOrders({ ...commonParams, after: prevStart.toISOString(),     before: prevEnd.toISOString()     }),
+              ]);
+              const onlyDLTLineItems = (orders) => {
+                return (orders || []).map(o => {
+                  const dltItems = (o.line_items || []).filter(li => isDLTLineItem(li, dltProductIds));
+                  return { ...o, line_items: dltItems };
+                }).filter(o => (o.line_items || []).length > 0);
+              };
+              const ordersThisMonth = onlyDLTLineItems(ordersThisMonthRaw);
+              const ordersSeason = onlyDLTLineItems(ordersSeasonRaw);
+              const ordersPrevMonth = onlyDLTLineItems(ordersPrevMonthRaw);
+              const countPlayers = (orders) => orders.reduce((acc, o) => acc + (o.line_items||[]).reduce((q, li) => q + (li.quantity||0), 0), 0);
+              const moneyInSeason = sumDLT(ordersSeason);
+              const budgetLeft = Math.max(DLT_BUDGET - moneyInSeason, 0);
+              let boys = 0, girls = 0;
+              ordersSeason.forEach(o => { const g = extractGenderFromMeta(o.meta_data || []); if (g === 'boy') boys += 1; else if (g === 'girl') girls += 1; });
+              const playersSeason = countPlayers(ordersSeason);
+              const salesThisMonth = sumDLT(ordersThisMonth);
+              const salesPrevMonth = sumDLT(ordersPrevMonth);
+              const growth = salesPrevMonth > 0 ? (((salesThisMonth - salesPrevMonth) / salesPrevMonth) * 100).toFixed(2) : 0;
+              setStats({ moneyIn: moneyInSeason, budgetLeft, playersTotal: playersSeason, boysCount: boys, girlsCount: girls, ordersCount: ordersThisMonth.length, growth });
+              const dailySales = {};
+              ordersThisMonth.forEach(order => {
+                const date = (order.date_created || '').split('T')[0];
+                if (!date) return;
+                dailySales[date] = (dailySales[date] || 0) + parseFloat(order.total || 0);
+              });
+              const monthly = Object.keys(dailySales).map(date => ({ date, amount: dailySales[date] })).sort((a, b) => new Date(a.date) - new Date(b.date));
+              setMonthlyData(monthly);
+              const firstDayWeek = new Date(today); firstDayWeek.setDate(today.getDate() - today.getDay() + 1);
+              const weeklySales = {}; for (let i = 0; i < 7; i++) { const d = new Date(firstDayWeek); d.setDate(firstDayWeek.getDate() + i); weeklySales[d.getDate()] = 0; }
+              ordersThisMonth.filter(order => new Date(order.date_created) >= firstDayWeek).forEach(order => {
+                const day = new Date(order.date_created).getDate();
+                weeklySales[day] = (weeklySales[day] || 0) + parseFloat(order.total || 0);
+              });
+              const weekly = Object.keys(weeklySales).map(day => ({ day: parseInt(day, 10), amount: weeklySales[day] })).sort((a, b) => a.day - b.day);
+              setWeeklyData(weekly);
+              setLatestOrders(ordersThisMonth.sort((a, b) => new Date(b.date_created) - new Date(a.date_created)));
+              const clubs = tallyByMeta(ordersSeason, ["dlt_klubblag", "klubblag", "klubb"]);
+              const positions = tallyByMeta(ordersSeason, ["dlt_basket_position", "position", "basket_position"]);
+              const birthYears = tallyByMeta(ordersSeason, ["dlt_alderspelare", "fodelsear", "födelseår", "ar_du_ar_fodd"]);
+              const series = tallyByMeta(ordersSeason, ["dlt_aktuellserie", "aktuellserie", "serie"]);
+              const tshirts = tallyByMeta(ordersSeason, ["dlt_tshirt", "tshirt", "t-shirt", "storlek"]);
+              const products = tallyByProduct(ordersSeason);
+              setInsights({ clubs, positions, birthYears, series, tshirts, products });
+              // write caches
+              setCache(KEY_AGG, { moneyIn: moneyInSeason, budgetLeft, playersTotal: playersSeason, boysCount: boys, girlsCount: girls, ordersCount: ordersThisMonth.length, growth }, 10*60*1000);
+              setCache(KEY_MONTH, monthly, 5*60*1000);
+              setCache(KEY_WEEK, weekly, 5*60*1000);
+              setCache(KEY_LATEST, ordersThisMonth.sort((a, b) => new Date(b.date_created) - new Date(a.date_created)), 3*60*1000);
+              setCache(KEY_INS, { clubs, positions, birthYears, series, tshirts, products }, 10*60*1000);
+            } catch (e) { console.error(e); }
+          })();
+        }}>Uppdatera</Button>
+      </Flex>
       <SimpleGrid columns={{ base: 1, md: 2, xl: 5 }} gap='16px' mb='16px'>
         {/* 1: Toppklubbar */}
         <SmallTopList

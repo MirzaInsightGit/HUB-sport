@@ -1,5 +1,6 @@
 // src/views/admin/Seasons.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { useMsal } from "@azure/msal-react";
 import { Link } from "react-router-dom";
 import {
   Box,
@@ -20,11 +21,43 @@ import {
   WrapItem,
   Badge,
   SimpleGrid,
+  Flex,
 } from "@chakra-ui/react";
 import {
   useProfixioSeasons,
   useProfixioSeasonTournaments,
 } from "../../hooks/useProfixio";
+
+// --- Local session cache helpers (JS) -----------------------------------------
+const __CACHE_NS = "hub-cache.v1";
+const makeKey = (key, coachId, tenantId = "single") =>
+  `${__CACHE_NS}::${tenantId}::${coachId || "anon"}::${key}`;
+const getCache = (fullKey) => {
+  try {
+    const raw = sessionStorage.getItem(fullKey);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (!entry || typeof entry !== "object") return null;
+    const { ts, ttl, data } = entry;
+    if (!ts || typeof ttl !== "number") return null;
+    if (Date.now() - ts > ttl) {
+      sessionStorage.removeItem(fullKey);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+};
+const setCache = (fullKey, data, ttlMs) => {
+  try {
+    sessionStorage.setItem(
+      fullKey,
+      JSON.stringify({ ts: Date.now(), ttl: ttlMs, data })
+    );
+  } catch {}
+};
+// -----------------------------------------------------------------------------
 
 const ORG_ID = process.env.REACT_APP_PROFIXIO_ORG || "SBBF.SE.BB";
 const TOURNAMENT_ROUTE_BASE = "/admin/tournaments";
@@ -72,10 +105,28 @@ const Seasons = () => {
   const cardBg = useColorModeValue("white", "gray.800");
   const muted = useColorModeValue("gray.600", "gray.300");
 
+  const { accounts } = useMsal();
+  const coachId = accounts?.[0]?.username || accounts?.[0]?.localAccountId || "local-dev";
+  const tenantId = process.env.REACT_APP_TENANT_ID || "single";
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
   // 1) Hämta säsonger och välj aktiv
   const { data: seasons = [], loading: loadingSeasons } = useProfixioSeasons(ORG_ID);
   const [selectedSeasonId, setSelectedSeasonId] = useState("");
   const [activeSeasonTab, setActiveSeasonTab] = useState(0);
+  const cacheKey = React.useMemo(() => {
+    const sid = selectedSeasonId || "none";
+    return makeKey(`seasons/${sid}`, coachId, tenantId);
+  }, [selectedSeasonId, coachId, tenantId]);
+  const [cachedSeasonTournaments, setCachedSeasonTournaments] = useState(null);
+  useEffect(() => {
+    const c = getCache(cacheKey);
+    if (c && Array.isArray(c)) {
+      setCachedSeasonTournaments(c);
+    } else {
+      setCachedSeasonTournaments(null);
+    }
+  }, [cacheKey]);
 
   useEffect(() => {
     if (!loadingSeasons && Array.isArray(seasons) && seasons.length) {
@@ -87,11 +138,24 @@ const Seasons = () => {
   }, [loadingSeasons, seasons, selectedSeasonId]);
 
   // 2) Turneringar i vald säsong
-  const { data: seasonTournamentsRaw, loading: loadingTournaments } = useProfixioSeasonTournaments(selectedSeasonId, { sportId: "BB" });
+  const { data: seasonTournamentsRaw, loading: loadingTournaments } =
+    useProfixioSeasonTournaments(selectedSeasonId, { sportId: "BB", refresh: refreshNonce });
   const seasonTournaments = useMemo(() => {
-    if (Array.isArray(seasonTournamentsRaw)) return seasonTournamentsRaw;
-    return seasonTournamentsRaw?.data || [];
-  }, [seasonTournamentsRaw]);
+    const rawArr = Array.isArray(seasonTournamentsRaw)
+      ? seasonTournamentsRaw
+      : (seasonTournamentsRaw?.data || null);
+    const source = (rawArr && rawArr.length) ? rawArr : (cachedSeasonTournaments || []);
+    return Array.isArray(source) ? source : [];
+  }, [seasonTournamentsRaw, cachedSeasonTournaments]);
+  useEffect(() => {
+    const rawArr = Array.isArray(seasonTournamentsRaw)
+      ? seasonTournamentsRaw
+      : seasonTournamentsRaw?.data;
+    if (Array.isArray(rawArr) && rawArr.length) {
+      setCache(cacheKey, rawArr, 10 * 60 * 1000); // 10 min TTL
+      setCachedSeasonTournaments(rawArr);
+    }
+  }, [seasonTournamentsRaw, cacheKey]);
 
   // 3) Sök + filtrering (distrikt/kategori + ålder/division + nivå från namn)
   const [query, setQuery] = useState("");
@@ -274,48 +338,67 @@ const Seasons = () => {
     <Box p={4} bg={pageBg} minH="100%">
       {/* Sticky säsongsflikar */}
       <Box position="sticky" top="100px" zIndex={4} bg={pageBg} pb={4} pt={3} mb={6}>
-        {showTabs && (
-          <Tabs
-            index={activeSeasonTab}
-            onChange={(i) => {
-              setActiveSeasonTab(i);
-              const s = seasons[i];
-              const raw = s?.id ?? s?.code ?? s?.seasonId ?? "";
-              const sid = typeof raw === "string" ? Number(raw) || raw : raw;
-              setSelectedSeasonId(sid);
-              setDistrictId("");
-              setDivisionId("");
-              setLevel("");
-              setQuery("");
-            }}
-            isFitted
-            overflowX="auto"
-            variant="soft-rounded"
-            colorScheme="purple"
+        <Flex align="center" justify="space-between" gap={3}>
+          <Box flex="1" minW={0}>
+            {showTabs && (
+              <Tabs
+                index={activeSeasonTab}
+                onChange={(i) => {
+                  setActiveSeasonTab(i);
+                  const s = seasons[i];
+                  const raw = s?.id ?? s?.code ?? s?.seasonId ?? "";
+                  const sid = typeof raw === "string" ? Number(raw) || raw : raw;
+                  setSelectedSeasonId(sid);
+                  setDistrictId("");
+                  setDivisionId("");
+                  setLevel("");
+                  setQuery("");
+                }}
+                isFitted
+                overflowX="auto"
+                variant="soft-rounded"
+                colorScheme="purple"
+                size="sm"
+              >
+                <TabList overflowX="auto" overflowY="hidden" pb={1} css={{ scrollbarWidth: "thin" }}>
+                  {seasons.map((s) => {
+                    const sid = s.id ?? s.code ?? s.seasonId;
+                    const sname = s.name ?? s.code ?? String(sid);
+                    return (
+                      <Tab key={sid} whiteSpace="nowrap" mr={2} px={4} borderRadius="full">
+                        {sname}
+                      </Tab>
+                    );
+                  })}
+                </TabList>
+              </Tabs>
+            )}
+          </Box>
+          <Button
             size="sm"
+            variant="outline"
+            minW="110px"
+            onClick={() => {
+              try { sessionStorage.removeItem(cacheKey); } catch {}
+              setRefreshNonce((n) => n + 1);
+            }}
           >
-            <TabList overflowX="auto" overflowY="hidden" pb={1} css={{ scrollbarWidth: "thin" }}>
-              {seasons.map((s) => {
-                const sid = s.id ?? s.code ?? s.seasonId;
-                const sname = s.name ?? s.code ?? String(sid);
-                return (
-                  <Tab key={sid} whiteSpace="nowrap" mr={2} px={4} borderRadius="full">
-                    {sname}
-                  </Tab>
-                );
-              })}
-            </TabList>
-          </Tabs>
-        )}
+            Uppdatera
+          </Button>
+        </Flex>
       </Box>
 
       {/* Endast en (ren) högerkolumn kvar */}
       <Box bg={cardBg} borderRadius="xl" p={4} boxShadow="sm" minH="100px" mt="70px">
-        <HStack justify="space-between" align="center" mb={5} spacing={3} flexWrap="nowrap">
+        <HStack justify="space-between" align="center" mb={5} spacing={3}>
           <Text fontSize="lg" fontWeight="700">
             Turneringar i säsongen
           </Text>
-          <HStack spacing={3} flexWrap="nowrap">
+          <HStack
+            spacing={3}
+            flexWrap="nowrap"
+            align="center"
+          >
             <Select
               placeholder="Välj distrikt"
               value={districtId}
@@ -326,9 +409,11 @@ const Seasons = () => {
               }}
               size="sm"
               maxW="220px"
+              minW="220px"
               borderRadius="full"
               bg="blue.50"
               variant="filled"
+              flexShrink={0}
             >
               {districtOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -345,10 +430,12 @@ const Seasons = () => {
               }}
               size="sm"
               maxW="180px"
+              minW="180px"
               isDisabled={divisionOptions.length === 0}
               borderRadius="full"
               bg="blue.50"
               variant="filled"
+              flexShrink={0}
             >
               {divisionOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -362,10 +449,12 @@ const Seasons = () => {
               onChange={(e) => setLevel(e.target.value)}
               size="sm"
               maxW="160px"
+              minW="140px"
               isDisabled={levelOptions.length === 0}
               borderRadius="full"
               bg="blue.50"
               variant="filled"
+              flexShrink={0}
             >
               {levelOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -379,9 +468,11 @@ const Seasons = () => {
               onChange={(e) => setQuery(e.target.value)}
               size="sm"
               maxW="220px"
+              minW="220px"
               borderRadius="full"
               bg="blue.50"
               variant="filled"
+              flexShrink={0}
             />
           </HStack>
         </HStack>
@@ -411,7 +502,7 @@ const Seasons = () => {
           </HStack>
         )}
 
-        {loadingTournaments ? (
+        {(seasonTournaments.length === 0 && loadingTournaments) ? (
           <HStack spacing={3} color={muted}>
             <Spinner size="sm" />
             <Text>Laddar turneringar…</Text>

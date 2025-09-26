@@ -17,7 +17,7 @@ import {
 } from 'react-icons/md';
 
 // Admin Imports
-import MainDashboard from 'views/admin/default';
+import MainDashboard from 'views/admin/hub';
 import NFTMarketplace from 'views/admin/marketplace';
 import Profile from 'views/admin/profile';
 import StatistikDistrikt from 'views/admin/statistik';
@@ -46,7 +46,7 @@ const routes = [
   {
     name: 'HUB',
     layout: '/admin',
-    path: '/default',
+    path: '/hub',
     icon: <Icon as={MdHome} width="20px" height="20px" color="inherit" />,
     component: <MainDashboard />,
   },

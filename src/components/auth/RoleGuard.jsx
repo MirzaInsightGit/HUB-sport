@@ -11,7 +11,7 @@ import { Navigate } from 'react-router-dom';
  *
  * Ingen nätverksanrop, ingen token-hämtning – endast redan-inlästa claims via MSAL.
  */
-export default function RoleGuard({ allow = [], redirect = '/admin/default', children }) {
+export default function RoleGuard({ allow = [], redirect = '/admin/hub', children }) {
   const { instance, accounts } = useMsal();
   const account = instance.getActiveAccount() || accounts?.[0] || null;
 

@@ -78,7 +78,7 @@ export default function AdminNavbar(props) {
 	};
 
 	const buildCrumbs = (pathname) => {
-		// Expect paths like /admin/default, /admin/notifications, /coach/...
+		// Expect paths like /admin/hub, /admin/notifications, /coach/...
 		const segs = pathname.split('?')[0].split('#')[0].split('/').filter(Boolean);
 		if (segs.length === 0) return [{ label: 'Home', to: '/' }];
 		const layout = '/' + segs[0];

@@ -74,9 +74,9 @@ const LandingRedirect = () => {
   const roles = user?.roles ?? [];
   const groups = user?.groups ?? [];
 
-  // En enda URL-yta: /admin/default används som "default" för både admin och coach
-  if (roles.includes('admin')) return <Navigate to="/admin/default" replace />;
-  if (roles.includes('coach') || groups.includes('f824f296-d48c-4b56-bf17-3368ecb58dfa')) return <Navigate to="/admin/default" replace />;
+  // En enda URL-yta: /admin/hub används som "default" för både admin och coach
+  if (roles.includes('admin')) return <Navigate to="/admin/hub" replace />;
+  if (roles.includes('coach') || groups.includes('f824f296-d48c-4b56-bf17-3368ecb58dfa')) return <Navigate to="/admin/hub" replace />;
   return <Navigate to="/unauthorized" replace />;
 };
 

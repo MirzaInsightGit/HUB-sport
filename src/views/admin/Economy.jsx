@@ -31,10 +31,31 @@ import {
   TabPanel,
   useColorModeValue,
 } from "@chakra-ui/react";
+import { useMsal } from "@azure/msal-react";
 import { MdPaid, MdSavings, MdGroups, MdInventory, MdWarningAmber } from "react-icons/md";
 import axios from "axios";
 import IconBox from 'components/icons/IconBox';
 import { API_BASE } from "../../config/apiBase";
+
+// --- Local session cache helpers (JS) -----------------------------------------
+const __CACHE_NS = 'hub-cache.v1';
+const makeKey = (key, coachId, tenantId = 'single') => `${__CACHE_NS}::${tenantId}::${coachId || 'anon'}::${key}`;
+const getCache = (fullKey) => {
+  try {
+    const raw = sessionStorage.getItem(fullKey);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (!entry || typeof entry !== 'object') return null;
+    const { ts, ttl, data } = entry;
+    if (!ts || typeof ttl !== 'number') return null;
+    if (Date.now() - ts > ttl) { sessionStorage.removeItem(fullKey); return null; }
+    return data;
+  } catch { return null; }
+};
+const setCache = (fullKey, data, ttlMs) => {
+  try { sessionStorage.setItem(fullKey, JSON.stringify({ ts: Date.now(), ttl: ttlMs, data })); } catch {}
+};
+// -----------------------------------------------------------------------------
 
 // ===== Dashboard-paritet: konstanter & helpers =====
 const DLT_BUDGET = Number(process.env.REACT_APP_DLT_BUDGET) || 250000;
@@ -190,6 +211,12 @@ export default function Economy() {
   const cardBg = useColorModeValue('white', 'navy.700');
   const textColor = useColorModeValue('secondaryGray.900', 'white');
 
+  const { accounts } = useMsal();
+  const coachId = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+  const tenantId = process.env.REACT_APP_TENANT_ID || 'single';
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const ECON_KEY = useMemo(() => makeKey(`economy/${period}`, coachId, tenantId), [period, coachId, tenantId]);
+
   // Aggregerade WC-metrics
   const { totalLeft, soldOutCount, lowCount } = useMemo(() => {
     const left = variants.reduce((sum, v) => sum + (typeof v.left === "number" ? v.left : 0), 0);
@@ -199,10 +226,18 @@ export default function Economy() {
   }, [variants]);
 
   useEffect(() => {
-    // Hämta säsongsmål (admin settings)
+    // Prime from cache for instant paint
     try {
-      const g = Number(localStorage.getItem('economy:seasonGoal'));
-      if (!isNaN(g) && g > 0) setGoal(g);
+      const c = getCache(ECON_KEY);
+      if (c) {
+        if (c.finance) setFinance(c.finance);
+        if (Array.isArray(c.sparkData)) setSparkData(c.sparkData);
+        if (typeof c.current === 'number') setCurrent(c.current);
+        if (typeof c.ordersThisMonthCount === 'number') setOrdersThisMonthCount(c.ordersThisMonthCount);
+        if (typeof c.fullPercent === 'number') setFullPercent(c.fullPercent);
+        if (typeof c.capacityTotal === 'number') setCapacityTotal(c.capacityTotal);
+        if (Array.isArray(c.variants)) setVariants(c.variants);
+      }
     } catch {}
 
     // Hämta nuvarande antal spelare
@@ -273,11 +308,21 @@ export default function Economy() {
         setCapacityTotal(capTotal);
         setFullPercent(capTotal > 0 ? Math.round((playersRange / capTotal) * 100) : 0);
         setVariants(items);
+        // write cache snapshot (10 min TTL)
+        setCache(ECON_KEY, {
+          finance: { earned: moneyInSeason, budgetAnnual: DLT_BUDGET, budgetLeft },
+          sparkData: spark,
+          current: playersRange,
+          ordersThisMonthCount: ordersThisMonth.length,
+          fullPercent: (capTotal > 0 ? Math.round((playersRange / capTotal) * 100) : 0),
+          capacityTotal: capTotal,
+          variants: items,
+        }, 10 * 60 * 1000);
       } catch (e) {
         console.error('Economy data load failed', e);
       }
     })();
-  }, [toast, period]);
+  }, [toast, period, ECON_KEY, refreshNonce]);
 
   const saveGoal = async () => {
     setSaving(true);
@@ -303,6 +348,9 @@ export default function Economy() {
         <Flex justify="space-between" align="center" mb={3}>
           <Box />
           <HStack>
+            <Button size="sm" variant="outline" onClick={() => { try { sessionStorage.removeItem(ECON_KEY); } catch {} setRefreshNonce(n => n + 1); }}>
+              Uppdatera
+            </Button>
             <Text color={textColor} fontSize="sm" mr={2}>Period</Text>
             <ButtonGroup size="sm" isAttached variant="outline">
               <Button onClick={() => setPeriod('month')} colorScheme={period === 'month' ? 'brand' : 'gray'}>Denna månad</Button>
