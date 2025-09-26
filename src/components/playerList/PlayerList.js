@@ -3,7 +3,7 @@ import { AgGridReact } from 'ag-grid-react';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import axios from 'axios';
-import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Box, useDisclosure, Spinner } from "@chakra-ui/react";
+import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Box, useDisclosure, Spinner, Checkbox, Popover, PopoverTrigger, PopoverContent, PopoverArrow, PopoverBody, PopoverCloseButton, useToast } from "@chakra-ui/react";
 import { useMsal } from "@azure/msal-react";
 import { API_BASE } from '../../config/apiBase';
 
@@ -58,10 +58,26 @@ const camps = ['Läger 1', 'Läger 2', 'Läger 3', 'Läger 4', 'Läger 5'];
 const categories = ['bollkontroll', 'forsvar', 'anfall', 'kommunikation', 'sociala', 'styrka', 'spelforstaelse'];
 
 const categoryTitles = ['Bollkontroll', 'Försvar', 'Anfall', 'Kommunikation', 'Sociala egenskaper', 'Styrka/Kondition', 'Spelförståelse'];
+// Kolumnhanterare: vilka topp-kolumner som kan döljas/visas via UI
+const TOGGLABLE_COLUMNS = [
+  { id: 'fav', label: 'Favorit' },
+  { id: 'spelarnamn', label: 'Spelarnamn' },
+  { id: 'kon', label: 'Kön' },
+  { id: 'alderspelare', label: 'Ålderspelare' },
+  { id: 'klubblag', label: 'Klubblag' },
+  { id: 'basket_position', label: 'Basket Position' },
+  { id: 'aktuellserie', label: 'Aktuell Serie' },
+  { id: 'mobilnummer', label: 'Mobilnummer' },
+  { id: 'spelarmejl', label: 'Spelarmejl' },
+  { id: 'tshirt_storlek', label: 'T-Shirt storlek' },
+  { id: 'parent_name', label: 'Föräldrar namn' },
+  { id: 'parent_email', label: 'Föräldrar Email' },
+  { id: 'parent_phone', label: 'Föräldrar Telefon' },
+  { id: 'parent_address', label: 'Föräldrar Adress' }
+];
 
 // eslint-disable-next-line no-unused-vars
-// NOTE: används av Azure-registrering (paritet i frontend även om listvyn inte nyttjar den direkt)
-const campProducts = {
+const campProducts = { // används av Azure-registrering (paritet i frontend även om listvyn inte nyttjar den direkt)
   0: 18801, // Läger 1
   1: 18867, // Läger 2
   2: 18868, // Läger 3
@@ -82,12 +98,51 @@ const PlayerList = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [loadedCount, setLoadedCount] = useState(0);
 
+  const toast = useToast();
+
+  // Controlled popover for columns
+  const colPicker = useDisclosure();
+
+  // Persistenta kolumnval per coach
+  const coachId = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+  const COL_KEY = `playerlist.columns.v1::${coachId}`;
+  const CACHE_KEY = `playerlist.cache.v1::${coachId}`;
+  const [colVisibility, setColVisibility] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_KEY) || 'null');
+      if (saved && typeof saved === 'object') return saved;
+    } catch (_) {}
+    // default: visa endast Favorit → Aktuell Serie
+    const allOn = {};
+    TOGGLABLE_COLUMNS.forEach(c => { allOn[c.id] = false; });
+    ['fav','spelarnamn','kon','alderspelare','klubblag','basket_position','aktuellserie']
+      .forEach(id => { allOn[id] = true; });
+    return allOn;
+  });
+
+  const applyVisibilityToGrid = useCallback(() => {
+    const colApi = gridRef.current?.columnApi;
+    if (!colApi) return;
+    const state = Object.entries(colVisibility).map(([colId, visible]) => ({ colId, hide: !visible }));
+    colApi.applyColumnState({ state, applyOrder: false });
+  }, [colVisibility]);
+
 
   // ---- Load players + favorites -------------------------------------------------
   const fetchPlayers = useCallback(async () => {
     try {
       setIsLoading(true);
       setLoadedCount(0);
+      // Session-cache för snabb navigering utan omladdning
+      try {
+        const cached = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+        if (cached && Array.isArray(cached.rows) && cached.rows.length > 0) {
+          setRowData(cached.rows);
+          setIsLoading(false);
+          // Fortsätt inte hämta om cache finns – snabb återkomst
+          return;
+        }
+      } catch (_) {}
       // Backend ger redan ihopslagna spelare (Woo + Cosmos ratings)
       // Hämta alla sidor om backend paginerar (per_page=100)
       let page = 1;
@@ -402,7 +457,6 @@ const PlayerList = () => {
       const playersWithFav = (players || []).map((p) => ({ ...normalize(p), isFavorite: favSet.has(p.id) }));
       console.log('[PlayerList] total players loaded:', playersWithFav.length);
       // Dedupe per spelare: robust gruppnyckel (email, annars phone, annars year, annars name)
-      const norm = (s) => (s || '').toString().trim().toLowerCase();
       const richness = (p) => [p.spelarmejl,p.mobilnummer,p.tshirt_storlek,p.klubblag,p.basket_position,p.aktuellserie].filter(x => x && String(x).trim()).length;
       const groups = new Map();
       for (const p of playersWithFav) {
@@ -458,20 +512,32 @@ const PlayerList = () => {
         deduped.push(best);
       }
       console.log('[PlayerList] deduped count:', { before: playersWithFav.length, after: deduped.length });
+      try {
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), rows: deduped }));
+      } catch (_) {}
       setRowData(deduped);
       setIsLoading(false);
     } catch (error) {
       console.error('Error fetching players:', error.response ? error.response.data : error.message);
       setIsLoading(false);
     }
-  }, [instance, accounts]);
+  }, [instance, accounts, CACHE_KEY]);
 
   useEffect(() => {
     fetchPlayers();
   }, [fetchPlayers]);
 
+  useEffect(() => {
+    const t = setTimeout(() => applyVisibilityToGrid(), 0);
+    return () => clearTimeout(t);
+  }, [applyVisibilityToGrid]);
+  const onFirstDataRendered = useCallback(() => {
+    // Säkerställ att state appliceras när kolumner och data är redo
+    applyVisibilityToGrid();
+  }, [applyVisibilityToGrid]);
+
   // ---- Favorit-toggle -----------------------------------------------------------
-  const toggleFavorite = async (player) => {
+  const toggleFavorite = useCallback(async (player) => {
     try {
       const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
       const scopes = apiScopeStr
@@ -509,10 +575,10 @@ const PlayerList = () => {
     } catch (e) {
       console.error('Toggle favorite failed:', e);
     }
-  };
+  }, [instance, accounts, favorites]);
 
   // ---- Spara rating/kommentar --------------------------------------------------
-  const savePlayerData = async (playerId, data) => {
+  const savePlayerData = useCallback(async (playerId, data) => {
     try {
       const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
       const scopes = apiScopeStr
@@ -532,7 +598,7 @@ const PlayerList = () => {
     } catch (err) {
       console.error('❌ Kunde inte spara betyg:', err?.response?.data || err.message);
     }
-  };
+  }, [instance, accounts]);
 
   // ---- Grid handlers ------------------------------------------------------------
   const onCellValueChanged = useCallback(async (params) => {
@@ -623,6 +689,9 @@ const PlayerList = () => {
 
   const onGridReady = (params) => {
     gridRef.current.api = params.api;
+    gridRef.current.columnApi = params.columnApi;
+    // Använd sparat kolumnläge direkt
+    applyVisibilityToGrid();
   };
 
   // ---- Heart cell ---------------------------------------------------------------
@@ -640,23 +709,25 @@ const PlayerList = () => {
   const columnDefs = useMemo(() => [
     {
       headerName: '❤',
+      colId: 'fav',
       width: 80,
       pinned: 'left',
+      hide: !colVisibility['fav'],
       cellRenderer: HeartCell
     },
-    { headerName: 'Spelarnamn', field: 'spelarnamn', sortable: true, filter: true, pinned: 'left' },
-    { headerName: 'Kön', field: 'kon', sortable: true, filter: true },
-    { headerName: 'Ålderspelare', field: 'alderspelare', sortable: true, filter: true },
-    { headerName: 'Klubblag', field: 'klubblag', sortable: true, filter: true },
-    { headerName: 'Basket Position', field: 'basket_position', sortable: true, filter: true },
-    { headerName: 'Aktuell Serie', field: 'aktuellserie', sortable: true, filter: true },
-    { headerName: 'Mobilnummer', field: 'mobilnummer', sortable: true, filter: true },
-    { headerName: 'Spelarmejl', field: 'spelarmejl', sortable: true, filter: true },
-    { headerName: 'T-Shirt storlek', field: 'tshirt_storlek', sortable: true, filter: true },
-    { headerName: 'Föräldrar namn', field: 'name', sortable: true, filter: true },
-    { headerName: 'Föräldrar Email', field: 'email', sortable: true, filter: true },
-    { headerName: 'Föräldrar Telefon', field: 'phone', sortable: true, filter: true },
-    { headerName: 'Föräldrar Adress', field: 'address', sortable: true, filter: true },
+    { headerName: 'Spelarnamn', colId: 'spelarnamn', field: 'spelarnamn', sortable: true, filter: true, pinned: 'left', hide: !colVisibility['spelarnamn'] },
+    { headerName: 'Kön', colId: 'kon', field: 'kon', sortable: true, filter: true, hide: !colVisibility['kon'] },
+    { headerName: 'Ålderspelare', colId: 'alderspelare', field: 'alderspelare', sortable: true, filter: true, hide: !colVisibility['alderspelare'] },
+    { headerName: 'Klubblag', colId: 'klubblag', field: 'klubblag', sortable: true, filter: true, hide: !colVisibility['klubblag'] },
+    { headerName: 'Basket Position', colId: 'basket_position', field: 'basket_position', sortable: true, filter: true, hide: !colVisibility['basket_position'] },
+    { headerName: 'Aktuell Serie', colId: 'aktuellserie', field: 'aktuellserie', sortable: true, filter: true, hide: !colVisibility['aktuellserie'] },
+    { headerName: 'Mobilnummer', colId: 'mobilnummer', field: 'mobilnummer', sortable: true, filter: true, hide: !colVisibility['mobilnummer'] },
+    { headerName: 'Spelarmejl', colId: 'spelarmejl', field: 'spelarmejl', sortable: true, filter: true, hide: !colVisibility['spelarmejl'] },
+    { headerName: 'T-Shirt storlek', colId: 'tshirt_storlek', field: 'tshirt_storlek', sortable: true, filter: true, hide: !colVisibility['tshirt_storlek'] },
+    { headerName: 'Föräldrar namn', colId: 'parent_name', field: 'name', sortable: true, filter: true, hide: !colVisibility['parent_name'] },
+    { headerName: 'Föräldrar Email', colId: 'parent_email', field: 'email', sortable: true, filter: true, hide: !colVisibility['parent_email'] },
+    { headerName: 'Föräldrar Telefon', colId: 'parent_phone', field: 'phone', sortable: true, filter: true, hide: !colVisibility['parent_phone'] },
+    { headerName: 'Föräldrar Adress', colId: 'parent_address', field: 'address', sortable: true, filter: true, hide: !colVisibility['parent_address'] },
     ...camps.flatMap((camp, campIndex) => [
       {
         headerName: `${camp} Anmäld`,
@@ -728,7 +799,7 @@ const PlayerList = () => {
         ]
       }
     ])
-  ], [ratingAverageRenderer, calculateAverage, onCellValueChanged, HeartCell]);
+  ], [ratingAverageRenderer, calculateAverage, onCellValueChanged, HeartCell, colVisibility]);
 
   // ---- Filter “visa favoriter” --------------------------------------------------
   const displayRows = useMemo(() => {
@@ -748,10 +819,78 @@ const PlayerList = () => {
         <Heading size='lg' color={textColor}>Registrerade Spelare till Tryout & Läger</Heading>
         <Flex>
           <Text mr='4' fontSize='sm' color='gray.600'>Antal spelare: {displayRows.length}</Text>
-          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Till dig coach! Betyg system för spelare</Button>
+          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg system för spelare</Button>
           <Button style={{ backgroundColor: 'lightblue' }} size='sm' ml='2' onClick={() => setShowOnlyFavorites(v => !v)}>
             {showOnlyFavorites ? 'Visa alla anmälda spelare' : 'Visa mina sparade favorit spelare'}
           </Button>
+          <Popover placement='bottom-end' isOpen={colPicker.isOpen} onClose={colPicker.onClose}>
+            <PopoverTrigger>
+              <Button ml='2' size='sm' onClick={colPicker.onToggle}>Kolumner</Button>
+            </PopoverTrigger>
+            <PopoverContent w='280px'>
+              <PopoverArrow />
+              <PopoverCloseButton />
+              <PopoverBody>
+                <Text fontSize='sm' mb='2' color='gray.600'>Välj vilka kolumner som ska visas</Text>
+                {TOGGLABLE_COLUMNS.map(c => (
+                  <Flex key={c.id} align='center' mb='1'>
+                    <Checkbox
+                      isChecked={!!colVisibility[c.id]}
+                      onChange={(e) => {
+                        const next = { ...colVisibility, [c.id]: e.target.checked };
+                        setColVisibility(next);
+                        // tillämpa direkt på grid
+                        const colApi = gridRef.current?.columnApi;
+                        if (colApi) colApi.applyColumnState({ state: [{ colId: c.id, hide: !e.target.checked }] });
+                      }}
+                    >{c.label}</Checkbox>
+                  </Flex>
+                ))}
+                <Flex mt='3' gap='2'>
+                  <Button size='sm' colorScheme='blue' onClick={() => {
+                    try {
+                      localStorage.setItem(COL_KEY, JSON.stringify(colVisibility));
+                      const colApi = gridRef.current?.columnApi;
+                      if (colApi) {
+                        const state = Object.entries(colVisibility).map(([colId, visible]) => ({ colId, hide: !visible }));
+                        colApi.applyColumnState({ state, applyOrder: false });
+                      }
+                      toast({
+                        title: 'Kolumnval sparade',
+                        description: 'Dina val kommer att ligga kvar till nästa gång.',
+                        status: 'success',
+                        duration: 2000,
+                        isClosable: true,
+                        position: 'bottom-right'
+                      });
+                      colPicker.onClose();
+                    } catch (_) {
+                      toast({
+                        title: 'Kunde inte spara',
+                        description: 'Kontrollera webbläsarens lagringsinställningar.',
+                        status: 'error',
+                        duration: 2500,
+                        isClosable: true,
+                        position: 'bottom-right'
+                      });
+                    }
+                  }}>Spara</Button>
+                  <Button size='sm' variant='outline' onClick={() => {
+                    const allOn = {};
+                    TOGGLABLE_COLUMNS.forEach(x => { allOn[x.id] = true; });
+                    setColVisibility(allOn);
+                    localStorage.setItem(COL_KEY, JSON.stringify(allOn));
+                    const colApi = gridRef.current?.columnApi;
+                    if (colApi) colApi.applyColumnState({ state: TOGGLABLE_COLUMNS.map(x => ({ colId: x.id, hide: false })) });
+                  }}>Återställ</Button>
+                </Flex>
+              </PopoverBody>
+            </PopoverContent>
+          </Popover>
+          <Button ml='2' size='sm' variant='outline' onClick={() => {
+            sessionStorage.removeItem(CACHE_KEY);
+            fetchPlayers();
+          }}>Uppdatera lista</Button>
         </Flex>
       </Flex>
       <Text mb='4' color='secondaryGray.700'>Ha tålamod, det tar en stund att ladda alla spelare.
@@ -792,6 +931,7 @@ const PlayerList = () => {
           getRowStyle={getRowStyle}
           stopEditingWhenCellsLoseFocus={true}
           onGridReady={onGridReady}
+          onFirstDataRendered={onFirstDataRendered}
         />
       </div>
 
