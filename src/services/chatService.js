@@ -175,5 +175,37 @@ export const fetchGroups = async () => {
   return [];
 };
 
+// Fetch messages for a given groupId, with fallback and error logging
+export const fetchMessages = async (groupId) => {
+  if (!groupId) return [];
+  const paths = [
+    `${CHAT_API}/groups/${groupId}/messages?limit=50`,
+    `${API_BASE}/groups/${groupId}/messages?limit=50`
+  ];
+  let lastErr;
+  for (const p of paths) {
+    try {
+      const { data } = await axios.get(p);
+      if (Array.isArray(data)) {
+        log('messages from', p, data.length);
+        return data;
+      }
+      if (Array.isArray(data?.messages)) {
+        log('messages from', p, data.messages.length);
+        return data.messages;
+      }
+      if (Array.isArray(data?.value)) {
+        log('messages from', p, data.value.length);
+        return data.value;
+      }
+    } catch (e) {
+      lastErr = e;
+      log('fetchMessages failed on', p, e?.response?.status || e?.message);
+    }
+  }
+  // No throw, just return []
+  return [];
+};
+
 export const isChatEnabled = () => !!socket;
 export const getSocketState = () => ({ enabled: !!socket, connected: !!socket?.connected, url: SOCKET_URL });

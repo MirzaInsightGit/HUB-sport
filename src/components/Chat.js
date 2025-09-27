@@ -34,7 +34,7 @@ import {
 import { FaCommentDots } from 'react-icons/fa';
 import axios from 'axios';
 import { FiPaperclip, FiSmile, FiMic, FiHome, FiMessageSquare, FiHelpCircle, FiBell, FiX } from 'react-icons/fi';
-import { sendMessage, onReceiveMessage, joinGroup, fetchUsers, createGroup, fetchGroups, connectChat } from '../services/chatService';
+import { sendMessage, onReceiveMessage, joinGroup, fetchUsers, createGroup, fetchGroups, connectChat, fetchMessages } from '../services/chatService';
 
 /**
  * Intercom‑style chat widget
@@ -85,15 +85,32 @@ const Chat = () => {
   const chipBg = useColorModeValue('gray.100', 'gray.700');
   const footerInputBg = useColorModeValue('white', 'gray.700');
 
-  // bootstrap (data only)
+  // bootstrap (data only) + select first group on mount
   useEffect(() => {
+    let cancelled = false;
     fetchUsers().then((arr) => {
+      if (cancelled) return;
       setUsers(arr);
       const map = {};
       (arr || []).forEach(u => { map[u.id] = u; });
       usersById.current = map;
     }).catch(console.error);
-    fetchGroups().then(setGroups).catch(console.error);
+
+    (async () => {
+      try {
+        const gs = await fetchGroups();
+        if (cancelled) return;
+        setGroups(gs);
+        if (!selectedGroupRef.current && gs && gs.length) {
+          setSelectedGroup(gs[0].id);
+          selectedGroupRef.current = gs[0].id;
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, []);
 
   // connect socket + subscribe when widget opens
@@ -117,8 +134,7 @@ const Chat = () => {
 
   const fetchHistory = async (groupId) => {
     try {
-      const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || '/api';
-      const { data } = await axios.get(`${base}/chat/groups/${groupId}/messages?limit=50`);
+      const data = await fetchMessages(groupId, 50);
       return (data || []).reverse().map(m => ({ user: m.senderName || m.user || 'User', message: m.text || m.message, groupId: m.groupId }));
     } catch (e) {
       console.error('history failed', e?.message);
@@ -126,16 +142,29 @@ const Chat = () => {
     }
   };
 
-  // join & load messages when group changes
+  // join & load messages when group changes (race/cancel safe, 404=empty)
   useEffect(() => {
     selectedGroupRef.current = selectedGroup;
-    if (selectedGroup) {
-      joinGroup(selectedGroup);
-      fetchHistory(selectedGroup).then(setMessages);
-    } else {
+    let cancelled = false;
+    if (!selectedGroup) {
       setMessages([]);
+      return () => { cancelled = true; };
     }
-  }, [selectedGroup, groups]);
+    // Join the room
+    joinGroup(selectedGroup);
+    // Load history safely
+    (async () => {
+      try {
+        const history = await fetchHistory(selectedGroup);
+        if (!cancelled) setMessages(history);
+      } catch (err) {
+        const status = err?.response?.status || err?.status;
+        if (!cancelled) setMessages([]); // treat 404/new group as empty
+        if (status && status !== 404) console.error('history load failed', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedGroup]);
 
   // autoscroll
   useEffect(() => {
@@ -174,7 +203,6 @@ const Chat = () => {
       setNewGroupName('');
       setNewGroupMembers([]);
       setSelectedGroup(group.id);
-      joinGroup(group.id);
     } catch (e) {
       console.error(e);
     }
@@ -186,7 +214,10 @@ const Chat = () => {
       const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE) || '/api';
       await axios.delete(`${base}/chat/groups/${selectedGroup}`);
       setGroups(prev => prev.filter(g => g.id !== selectedGroup));
-      setSelectedGroup(null);
+      if (selectedGroupRef.current === selectedGroup) {
+        setSelectedGroup(null);
+        selectedGroupRef.current = null;
+      }
       setMessages([]);
     } catch (e) {
       console.error('delete group failed', e?.message);
