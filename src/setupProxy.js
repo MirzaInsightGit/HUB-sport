@@ -11,9 +11,9 @@ function toBool(v) {
 
 /**
  * CRA dev proxy so the SPA can always call "/api/...".
- * Selection order:
- * 1) BACKEND_LOCAL=1 -> http://localhost:8080/api
- * 2) REACT_APP_API_BASE if it's a full URL (starts with http)
+ * Selection order (prefer Azure in dev):
+ * 1) REACT_APP_API_BASE if it's a full URL (starts with http)
+ * 2) BACKEND_LOCAL=1 -> http://localhost:8080/api
  * 3) REACT_APP_API_BASE_AZURE
  * 4) REACT_APP_API_BASE_PROD
  * 5) fallback http://localhost:8080/api
@@ -25,8 +25,8 @@ module.exports = function (app) {
   const prodBase = process.env.REACT_APP_API_BASE_PROD;
 
   let apiBase =
-    (preferLocal && 'http://localhost:8080/api') ||
     (envBase && /^https?:/i.test(envBase) && envBase) ||
+    (preferLocal && 'http://localhost:8080/api') ||
     azureBase ||
     prodBase ||
     'http://localhost:8080/api';
@@ -41,6 +41,7 @@ module.exports = function (app) {
   const agent = useHttps ? httpsAgent : httpAgent;
 
   let printed = false;
+  let printedWs = false;
 
   app.use(
     '/api',
@@ -73,6 +74,41 @@ module.exports = function (app) {
         const payload = { error: 'proxy_error', code, target };
         res.writeHead(502, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(payload));
+      },
+    })
+  );
+
+  app.use(
+    '/socket.io',
+    (req, res, next) => {
+      if (!printedWs) {
+        // eslint-disable-next-line no-console
+        console.log(`[setupProxy] /socket.io (WS) → ${target}`);
+        printedWs = true;
+      }
+      next();
+    },
+    createProxyMiddleware({
+      target,
+      changeOrigin: true,
+      secure: false,
+      xfwd: true,
+      agent,
+      ws: true,
+      logLevel: 'warn',
+      proxyTimeout: 300000,
+      timeout: 300000,
+      onProxyReqWs(proxyReq, req, socket, options, head) {
+        // Keep WebSocket alive
+        try { proxyReq.setHeader('Connection', 'keep-alive, Upgrade'); } catch {}
+      },
+      onError(err, req, res) {
+        const code = err && (err.code || 'ECONNRESET');
+        const payload = { error: 'proxy_error_ws', code, target };
+        try {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(payload));
+        } catch {}
       },
     })
   );
