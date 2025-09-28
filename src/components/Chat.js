@@ -6,7 +6,7 @@ import {
   Button,
   Text,
   VStack,
-  Avatar,
+  Avatar, AvatarGroup, Tooltip, Collapse, Wrap, WrapItem, Tag,
   useColorModeValue,
   IconButton,
   Badge,
@@ -35,6 +35,7 @@ import { FaCommentDots } from 'react-icons/fa';
 import axios from 'axios';
 import { FiPaperclip, FiSmile, FiMic, FiHome, FiMessageSquare, FiHelpCircle, FiBell, FiX } from 'react-icons/fi';
 import { sendMessage, onReceiveMessage, joinGroup, fetchUsers, createGroup, fetchGroups, connectChat, fetchMessages } from '../services/chatService';
+import { getMyDisplayName, getMyOid } from '../utils/auth';
 
 /**
  * Intercom‑style chat widget
@@ -62,6 +63,8 @@ const Chat = () => {
   const [activeTab, setActiveTab] = useState('messages'); // 'home' | 'messages' | 'help' | 'news'
   const canDelete = true; // TODO: role-based
   const usersById = useRef({});
+  const myNameRef = useRef(getMyDisplayName());
+  const myOidRef = useRef(getMyOid());
 
   // create-group state
   const [newGroupName, setNewGroupName] = useState('');
@@ -118,9 +121,9 @@ const Chat = () => {
     if (!isOpen) return;
     connectChat();
     const messageListener = (data) => {
-      if (data.groupId === selectedGroupRef.current) {
-        setMessages((prev) => [...prev, data]);
-      }
+      if (data.groupId !== selectedGroupRef.current) return;
+      // `data` is already normalized by chatService (_normalizeMessage)
+      setMessages((prev) => [...prev, data]);
     };
     const unsubscribe = onReceiveMessage(messageListener);
     // if a group is already selected, (re)join after connect
@@ -135,7 +138,8 @@ const Chat = () => {
   const fetchHistory = async (groupId) => {
     try {
       const data = await fetchMessages(groupId, 50);
-      return (data || []).reverse().map(m => ({ user: m.senderName || m.user || 'User', message: m.text || m.message, groupId: m.groupId }));
+      // chatService returns newest-first; reverse to show oldest-first
+      return (data || []).slice().reverse();
     } catch (e) {
       console.error('history failed', e?.message);
       return [];
@@ -177,7 +181,14 @@ const Chat = () => {
     // Optimistic render so the user sees the message instantly
     setMessages((prev) => [
       ...prev,
-      { user: 'Me', message: text, groupId: selectedGroup, optimistic: true },
+      {
+        senderName: myNameRef.current || 'Jag',
+        text,
+        groupId: selectedGroup,
+        isMe: true,
+        optimistic: true,
+        ts: new Date().toISOString(),
+      },
     ]);
     setInput('');
     setIsSending(true);
@@ -229,6 +240,14 @@ const Chat = () => {
     g.name?.toLowerCase().includes(search.toLowerCase())
   );
 
+  const [showMembers, setShowMembers] = useState(false);
+
+  const currentGroup = groups.find((g) => g.id === selectedGroup) || null;
+  const resolvedMembers = (currentGroup?.members || [])
+    .map((mid) => usersById.current[mid])
+    .filter(Boolean);
+  const memberCount = resolvedMembers.length;
+
   return (
     <>
       {/* Floating bubble */}
@@ -247,18 +266,20 @@ const Chat = () => {
       />
 
       {/* Drawer panel */}
-      <Drawer isOpen={isOpen} placement="right" onClose={() => setIsOpen(false)} size="xs">
+      <Drawer isOpen={isOpen} placement="right" onClose={() => setIsOpen(false)} size="md">
         <DrawerOverlay />
         <DrawerContent
           bg={surface}
-          w={{ base: '100vw', md: '460px' }}
-          maxW={{ base: '100vw', md: '460px' }}
+          w={{ base: '100vw', md: '680px' }}
+          maxW={{ base: '100vw', md: '680px' }}
           h="100vh"
           my={0}
           borderRadius={{ base: 0, md: '2xl' }}
           overflow="hidden"
+          overflowX="hidden"
           shadow="xl"
           borderWidth={{ base: 0, md: '1px' }}
+          px={0}
         >
           <DrawerHeader borderBottomWidth="1px" py={3}>
             <Flex align="center" justify="space-between">
@@ -268,11 +289,11 @@ const Chat = () => {
             </Flex>
           </DrawerHeader>
 
-          <DrawerBody p={0}>
+          <DrawerBody p={0} style={{ overflowX: 'hidden' }}>
             {activeTab === 'messages' ? (
               <Flex h="full" minH="500px">
                 {/* Left: groups / users / create */}
-                <Box w={{ base: '42%', md: '34%' }} maxW="220px" borderRight="1px solid" borderColor={border} bg={leftBg} borderRightRadius="xl">
+                <Box w={{ base: '44%', md: '40%' }} maxW="300px" borderRight="1px solid" borderColor={border} bg={leftBg} borderRightRadius="xl">
                   <Tabs variant="enclosed" size="sm" isFitted>
                     <TabList>
                       <Tab>Grupper</Tab>
@@ -353,47 +374,78 @@ const Chat = () => {
                   {selectedGroup && (
                     <>
                       <Flex align="center" justify="space-between" px={4} py={3} borderBottom="1px solid" borderColor={border}>
-                        <VStack align="start" spacing={1}>
-                          <Text fontWeight="bold">
-                            {groups.find((g) => g.id === selectedGroup)?.name || 'Konversation'}
-                          </Text>
-                          <HStack spacing={2} wrap="wrap">
-                            {(groups.find(g => g.id === selectedGroup)?.members || []).map(mid => {
-                              const u = usersById.current[mid];
-                              const label = u?.displayName || u?.userPrincipalName || 'Medlem';
-                              return (
-                                <HStack key={mid} spacing={1} px={2} py={1} borderRadius="full" bg={chipBg}>
-                                  <Avatar name={label} size="xs" />
-                                  <Text fontSize="xs">{label}</Text>
-                                </HStack>
-                              );
-                            })}
+                        <VStack align="start" spacing={1} w="full">
+                          <HStack w="full" justify="space-between" align="center">
+                            <HStack spacing={3}>
+                              <AvatarGroup size="sm" max={4}>
+                                {resolvedMembers.map((u) => (
+                                  <Tooltip key={u.id} label={u.displayName || u.userPrincipalName}>
+                                    <Avatar name={(u.displayName || u.userPrincipalName || 'Medlem')} />
+                                  </Tooltip>
+                                ))}
+                              </AvatarGroup>
+                              <VStack align="start" spacing={0}>
+                                <Text fontWeight="bold">
+                                  {currentGroup?.name || 'Konversation'}
+                                </Text>
+                                <Text fontSize="xs" color="gray.500">
+                                  {memberCount} {memberCount === 1 ? 'medlem' : 'medlemmar'}
+                                </Text>
+                              </VStack>
+                            </HStack>
+
+                            <HStack>
+                              {canDelete && (
+                                <Button size="sm" variant="ghost" colorScheme="red" onClick={handleDeleteGroup} borderRadius="full">
+                                  Radera
+                                </Button>
+                              )}
+                              <Button size="sm" variant="ghost" onClick={() => setShowMembers((s) => !s)} borderRadius="full">
+                                {showMembers ? 'Dölj' : 'Visa'} medlemmar
+                              </Button>
+                            </HStack>
                           </HStack>
+
+                          <Collapse in={showMembers} animateOpacity>
+                            <Wrap mt={2} spacing="8px">
+                              {resolvedMembers.map((u) => {
+                                const label = u.displayName || u.userPrincipalName || 'Medlem';
+                                return (
+                                  <WrapItem key={u.id}>
+                                    <HStack spacing={2} px={2} py={1} borderRadius="full" bg={chipBg}>
+                                      <Avatar name={label} size="xs" />
+                                      <Tag size="sm" borderRadius="full" variant="subtle">{label}</Tag>
+                                    </HStack>
+                                  </WrapItem>
+                                );
+                              })}
+                              {memberCount === 0 && (
+                                <WrapItem>
+                                  <Text fontSize="sm" color="gray.500">Inga medlemmar i denna grupp ännu.</Text>
+                                </WrapItem>
+                              )}
+                            </Wrap>
+                          </Collapse>
                         </VStack>
-                        {canDelete && (
-                          <Button size="sm" variant="ghost" colorScheme="red" onClick={handleDeleteGroup} borderRadius="full">
-                            Radera
-                          </Button>
-                        )}
                       </Flex>
 
                       <VStack spacing={4} flex={1} overflowY="auto" p={4} align="stretch">
                         {messages.map((msg, i) => (
-                          <Flex key={i} justify={msg.user === 'Me' ? 'flex-end' : 'flex-start'}>
-                            {msg.user !== 'Me' && <Avatar name={msg.user} mr={2} size="sm" />}
+                          <Flex key={i} justify={msg.isMe ? 'flex-end' : 'flex-start'}>
+                            {!msg.isMe && <Avatar name={msg.senderName || msg.user} mr={2} size="sm" />}
                             <Box
-                              bg={msg.user === 'Me' ? bubbleBgMe : bubbleBgOther}
-                              color={msg.user === 'Me' ? textColorMe : textColorOther}
+                              bg={msg.isMe ? bubbleBgMe : bubbleBgOther}
+                              color={msg.isMe ? textColorMe : textColorOther}
                               px={3}
                               py={2}
-                              borderRadius="lg"
-                              maxW="85%"
+                              borderRadius={msg.isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'}
+                              maxW="80%"
                               shadow="xs"
                             >
-                              <Text fontWeight="semibold" fontSize="sm">{msg.user}</Text>
-                              <Text whiteSpace="pre-wrap">{msg.message}</Text>
+                              <Text fontWeight="semibold" fontSize="sm">{msg.isMe ? (myNameRef.current || 'Jag') : (msg.senderName || msg.user || 'User')}</Text>
+                              <Text whiteSpace="pre-wrap">{msg.text || msg.message}</Text>
                             </Box>
-                            {msg.user === 'Me' && <Avatar name={msg.user} ml={2} size="sm" />}
+                            {msg.isMe && <Avatar name={msg.senderName || msg.user} ml={2} size="sm" />}
                           </Flex>
                         ))}
                         <div ref={messagesEndRef} />
@@ -416,10 +468,10 @@ const Chat = () => {
             )}
           </DrawerBody>
 
-          <DrawerFooter borderTopWidth="1px" py={4}>
+          <DrawerFooter borderTopWidth="1px" py={4} style={{ overflowX: 'hidden' }}>
             {activeTab === 'messages' ? (
               <VStack w="full" spacing={3}>
-                <Flex w="full" align="center" gap={4}>
+                <Flex w="full" align="center" gap={3} flexWrap="wrap" minWidth={0}>
                   <Textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -434,13 +486,15 @@ const Chat = () => {
                     py={3}
                     borderRadius="full"
                     borderWidth="1px"
+                    flex="1"
+                    minW={0}
                   />
-                  <HStack spacing={2}>
-                    <IconButton aria-label="Bifoga" icon={<FiPaperclip />} variant="ghost" size="md" borderRadius="full" />
-                    <IconButton aria-label="Emoji" icon={<FiSmile />} variant="ghost" size="md" borderRadius="full" />
-                    <IconButton aria-label="Mikrofon" icon={<FiMic />} variant="ghost" size="md" borderRadius="full" />
+                  <HStack spacing={1} flexShrink={0}>
+                    <IconButton aria-label="Bifoga" icon={<FiPaperclip />} variant="ghost" size="sm" borderRadius="full" />
+                    <IconButton aria-label="Emoji" icon={<FiSmile />} variant="ghost" size="sm" borderRadius="full" />
+                    <IconButton aria-label="Mikrofon" icon={<FiMic />} variant="ghost" size="sm" borderRadius="full" />
                   </HStack>
-                  <Button colorScheme="blue" onClick={handleSend} isDisabled={!selectedGroup || !input.trim()} isLoading={isSending} borderRadius="full" px={6} h="48px">
+                  <Button colorScheme="blue" onClick={handleSend} isDisabled={!selectedGroup || !input.trim()} isLoading={isSending} borderRadius="full" px={4} h="44px" flexShrink={0}>
                     Skicka
                   </Button>
                 </Flex>

@@ -1,8 +1,25 @@
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { getMyOid, getMyDisplayName } from '../utils/auth';
 
 // Lightweight logger
 const log = (...args) => (process.env.NODE_ENV !== 'production' ? console.debug('[chatService]', ...args) : undefined);
+
+const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
+
+const getToken = () => localStorage.getItem('access_token') || localStorage.getItem('id_token') || '';
+const ME = { oid: getMyOid && getMyOid(), name: getMyDisplayName && getMyDisplayName() };
+
+// Keep a short-lived cache of messages we sent (to help right-align history while backend rollout settles)
+const SENT_CACHE = [];
+const rememberSent = (m) => {
+  try {
+    SENT_CACHE.push({ text: m.text, groupId: m.groupId, ts: Date.now() });
+    // keep last 100 and max 5 minutes old
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    while (SENT_CACHE.length > 100 || (SENT_CACHE[0] && SENT_CACHE[0].ts < cutoff)) SENT_CACHE.shift();
+  } catch {}
+};
 
 // --- Chat helpers ---
 const getUserId = (u) => u?.oid || u?.sub || u?.id || u?.objectId || u?.preferred_username || u?.upn || u?.name || 'guest';
@@ -19,6 +36,44 @@ const normalizeGroups = (data) => {
   if (Array.isArray(data?.groups)) return data.groups;
   if (Array.isArray(data?.value)) return data.value;
   return [];
+};
+
+const normalizeMessage = (m = {}) => {
+  const msg = {
+    id: m.id || m._id || m.messageId || `msg_${Date.now()}`,
+    groupId: m.groupId || m.group_id || m.grp || m.group || '',
+    text: m.text ?? m.message ?? m.body ?? '',
+    ts: m.ts || m.timestamp || m.createdAt || new Date().toISOString(),
+    type: m.type || 'message',
+    senderId: m.senderId || m.userId || m.sender || m.createdBy || m.oid || m.user_oid || '',
+    senderName: m.senderName || m.userName || m.name || m.displayName || '',
+    raw: m,
+  };
+  // Primary: compare OID
+  let isMe =
+    !!ME.oid &&
+    !!msg.senderId &&
+    String(msg.senderId).toLowerCase() === String(ME.oid).toLowerCase();
+
+  // Fallback: compare display name if OID missing but name matches
+  if (!isMe && ME.name && msg.senderName) {
+    isMe = String(msg.senderName).toLowerCase() === String(ME.name).toLowerCase();
+  }
+
+  // Heuristic fallback: if backend lacked senderId/name, check if this text was just sent by this client
+  if (!isMe && (!msg.senderId || !msg.senderName)) {
+    const recent = SENT_CACHE.find(
+      (r) => r.groupId === msg.groupId && r.text === msg.text && Date.now() - r.ts < 5 * 60 * 1000
+    );
+    if (recent) isMe = true;
+  }
+
+  msg.isMe = !!isMe;
+
+  // Ensure my own messages show my name
+  if (msg.isMe && !msg.senderName) msg.senderName = ME.name || 'Me';
+
+  return msg;
 };
 
 // === Chat/WebSocket toggle ==============================================
@@ -56,6 +111,8 @@ if (CHAT_ENABLED) {
     withCredentials: true,
     autoConnect: false,
     path: '/socket.io',
+    auth: { token: getToken() },
+    query: { oid: ME.oid, name: ME.name }
   });
 }
 
@@ -68,6 +125,8 @@ export const connectChat = () => {
       withCredentials: true,
       autoConnect: false,
       path: '/socket.io',
+      auth: { token: getToken() },
+      query: { oid: ME.oid, name: ME.name }
     });
   }
   if (!socket.connected) {
@@ -87,25 +146,51 @@ const onNoop = () => noop;
 
 export const sendMessage = async (groupId, message) => {
   if (!groupId || !message) return;
-  // Realtime emit first (if possible)
-  try { if (socket?.connected) socket.emit('message:send', { groupId, message }); } catch {}
-  // Persist (also enables email fallback server-side)
+  const body = { message };
+
+  // optimistic local echo + heuristic cache
+  const optimistic = normalizeMessage({
+    id: `msg_${Date.now()}`,
+    groupId,
+    text: message,
+    ts: new Date().toISOString(),
+    type: 'message',
+    senderId: ME.oid,
+    senderName: ME.name,
+  });
+  rememberSent(optimistic);
+
+  // Emit first for realtime
   try {
-    const { data } = await axios.post(`${CHAT_API}/groups/${groupId}/messages`, { message });
-    return data; // expect saved message or { ok: true }
+    if (socket?.connected) {
+      socket.emit('message:send', {
+        groupId,
+        message,
+        senderId: ME.oid,
+        senderName: ME.name,
+      });
+    }
+  } catch {}
+
+  try {
+    const { data } = await axios.post(`${CHAT_API}/groups/${groupId}/messages`, body, { headers: authHeaders() });
+    // Server returns either `{ ok: true }` or a full message; normalize both
+    const normalized = Array.isArray(data) ? data.map(normalizeMessage) : normalizeMessage(data);
+    return normalized || optimistic;
   } catch (e) {
     log('sendMessage REST failed', e?.response?.status || e?.message);
-    throw e;
+    // fall back to optimistic so UI still shows something
+    return optimistic;
   }
 };
 
 export const onReceiveMessage = (callback) => {
-  if (!socket) return onNoop; // chat avstängd
-  const handler = (payload) => callback(payload);
+  if (!socket) return onNoop;
+  const handler = (payload) => callback(normalizeMessage(payload));
   socket.off('receiveMessage', handler);
   socket.off('message:new', handler);
-  socket.on('receiveMessage', handler); // legacy
-  socket.on('message:new', handler);    // preferred
+  socket.on('receiveMessage', handler);
+  socket.on('message:new', handler);
   return () => {
     socket?.off('receiveMessage', handler);
     socket?.off('message:new', handler);
@@ -135,7 +220,7 @@ export const fetchUsers = async () => {
   let lastErr;
   for (const p of paths) {
     try {
-      const { data } = await axios.get(p);
+      const { data } = await axios.get(p, { headers: authHeaders() });
       const users = normalizeUsers(data);
       if (users.length || Array.isArray(data)) {
         log('users from', p, users.length);
@@ -147,15 +232,40 @@ export const fetchUsers = async () => {
   return [];
 };
 
+// Alias: semantic name used by UI components
+export const listChatUsers = fetchUsers;
+
 export const createGroup = async (name, members) => {
   const body = { name, members };
   try {
-    const { data } = await axios.post(`${CHAT_API}/groups`, body);
+    const { data } = await axios.post(`${CHAT_API}/groups`, body, { headers: authHeaders() });
     return data;
   } catch {
-    const { data } = await axios.post(`${API_BASE}/groups`, body);
+    const { data } = await axios.post(`${API_BASE}/groups`, body, { headers: authHeaders() });
     return data;
   }
+};
+
+// Update group name + full members array (ADMIN)
+export const updateGroup = async (groupId, { name, members }) => {
+  const body = {};
+  if (typeof name === 'string') body.name = name;
+  if (Array.isArray(members)) body.members = members;
+  const { data } = await axios.put(`${CHAT_API}/groups/${encodeURIComponent(groupId)}`, body, { headers: authHeaders() });
+  return data;
+};
+
+// Patch only members (ADMIN) – add/remove arrays
+export const patchGroupMembers = async (groupId, { add = [], remove = [] } = {}) => {
+  const body = { add, remove };
+  const { data } = await axios.post(`${CHAT_API}/groups/${encodeURIComponent(groupId)}/members`, body, { headers: authHeaders() });
+  return data;
+};
+
+// Soft delete group (ADMIN or creator)
+export const deleteGroup = async (groupId) => {
+  const { data } = await axios.delete(`${CHAT_API}/groups/${encodeURIComponent(groupId)}`, { headers: authHeaders() });
+  return data;
 };
 
 export const fetchGroups = async () => {
@@ -163,7 +273,7 @@ export const fetchGroups = async () => {
   let lastErr;
   for (const p of paths) {
     try {
-      const { data } = await axios.get(p);
+      const { data } = await axios.get(p, { headers: authHeaders() });
       const groups = normalizeGroups(data);
       if (groups.length || Array.isArray(data)) {
         log('groups from', p, groups.length);
@@ -175,6 +285,9 @@ export const fetchGroups = async () => {
   return [];
 };
 
+// Alias for semantic name
+export const listGroups = fetchGroups;
+
 // Fetch messages for a given groupId, with fallback and error logging
 export const fetchMessages = async (groupId) => {
   if (!groupId) return [];
@@ -185,18 +298,18 @@ export const fetchMessages = async (groupId) => {
   let lastErr;
   for (const p of paths) {
     try {
-      const { data } = await axios.get(p);
+      const { data } = await axios.get(p, { headers: authHeaders() });
       if (Array.isArray(data)) {
         log('messages from', p, data.length);
-        return data;
+        return data.map(normalizeMessage);
       }
       if (Array.isArray(data?.messages)) {
         log('messages from', p, data.messages.length);
-        return data.messages;
+        return data.messages.map(normalizeMessage);
       }
       if (Array.isArray(data?.value)) {
         log('messages from', p, data.value.length);
-        return data.value;
+        return data.value.map(normalizeMessage);
       }
     } catch (e) {
       lastErr = e;
@@ -207,5 +320,17 @@ export const fetchMessages = async (groupId) => {
   return [];
 };
 
+// Alias for semantic name
+export const listMessages = fetchMessages;
+
+// Admin broadcast (email notifications)
+export const broadcastMail = async ({ audience = 'all', subject, message }) => {
+  const body = { audience, subject, message };
+  const { data } = await axios.post(`${API_BASE}/chat/broadcast`, body, { headers: authHeaders() });
+  return data;
+};
+
 export const isChatEnabled = () => !!socket;
 export const getSocketState = () => ({ enabled: !!socket, connected: !!socket?.connected, url: SOCKET_URL });
+
+export const _normalizeMessage = normalizeMessage;
