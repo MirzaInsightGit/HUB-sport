@@ -7,8 +7,19 @@ import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverl
 import { useMsal } from "@azure/msal-react";
 import { API_BASE } from '../../config/apiBase';
 
+// --- ENV (React .env) ----------------------------------------------------------
+// We use ONLY REACT_APP_* variables. (No Vite/import.meta here.)
+const TENANT_ID       = process.env.REACT_APP_TENANT_ID       || 'single';
+const API_SCOPE       = process.env.REACT_APP_API_SCOPE       || '';
+const API_CLIENT_ID   = process.env.REACT_APP_API_CLIENT_ID   || '';
+const DLT_CATEGORY_ID = process.env.REACT_APP_DLT_CATEGORY_ID || 'dlt';
+const CAMP_ID_MAP_RAW = process.env.REACT_APP_CAMP_ID_MAP     || '';
+const SEASON_START    = process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z';
+const SEASON_END      = process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z';
+// ------------------------------------------------------------------------------
+
 // --- Local session cache helpers (JS) -----------------------------------------
-const __CACHE_NS = 'hub-cache.v1';
+const __CACHE_NS = 'hub-cache.v2';
 const makeKey = (key, coachId, tenantId = 'single') => `${__CACHE_NS}::${tenantId}::${coachId || 'anon'}::${key}`;
 const getCache = (fullKey) => {
   try {
@@ -28,7 +39,6 @@ const getCache = (fullKey) => {
 const setCache = (fullKey, data, ttlMs) => {
   try { sessionStorage.setItem(fullKey, JSON.stringify({ ts: Date.now(), ttl: ttlMs, data })); } catch {}
 };
-// -----------------------------------------------------------------------------
 
 // ---- Helpers: fetch all WC orders + read meta --------------------------------
 const fetchAllOrders = async (params = {}) => {
@@ -128,7 +138,7 @@ const PlayerList = () => {
 
   // Persistenta kolumnval per coach
   const coachId = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
-  const tenantId = process.env.REACT_APP_TENANT_ID || 'single';
+  const tenantId = TENANT_ID;
   const COL_KEY = `playerlist.columns.v1::${coachId}`;
   const CACHE_KEY = makeKey('playerlist', coachId, tenantId);
   const [colVisibility, setColVisibility] = useState(() => {
@@ -188,8 +198,8 @@ const PlayerList = () => {
       try {
         const needsTshirt = (players || []).some(p => !p.tshirt_storlek && !p.tshirt && !p.tshirtSize);
         if (needsTshirt) {
-          const seasonStart = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z');
-          const seasonEnd   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z');
+          const seasonStart = new Date(SEASON_START);
+          const seasonEnd   = new Date(SEASON_END);
 
           // Pull all orders in season
           const orders = await fetchAllOrders({
@@ -239,8 +249,8 @@ const PlayerList = () => {
       try {
         const needsRegs = (players || []).some(p => !Array.isArray(p.registeredCamps) || p.registeredCamps.every(v => !v));
         if (needsRegs) {
-          const seasonStart = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z');
-          const seasonEnd   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z');
+          const seasonStart = new Date(SEASON_START);
+          const seasonEnd   = new Date(SEASON_END);
 
           const orders = await fetchAllOrders({
             status: 'completed,processing,on-hold',
@@ -248,7 +258,7 @@ const PlayerList = () => {
             before: seasonEnd.toISOString()
           });
 
-          const campMap = (process.env.REACT_APP_CAMP_ID_MAP || '')
+          const campMap = (CAMP_ID_MAP_RAW || '')
             .split(',')
             .map(s => s.trim())
             .filter(Boolean)
@@ -310,80 +320,6 @@ const PlayerList = () => {
         console.warn('[PlayerList] registeredCamps enrichment skipped:', e?.message || e);
       }
 
-      // --- Enrich missing registeredCamps from Woo (using ENV mapping) ---
-      try {
-        const needsRegs = (players || []).some(p => !Array.isArray(p.registeredCamps) || p.registeredCamps.every(v => !v));
-        if (needsRegs) {
-          const seasonStart = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z');
-          const seasonEnd   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z');
-
-          const orders = await fetchAllOrders({
-            status: 'completed,processing,on-hold',
-            after: seasonStart.toISOString(),
-            before: seasonEnd.toISOString()
-          });
-
-          const campMap = (process.env.REACT_APP_CAMP_ID_MAP || '')
-            .split(',')
-            .map(s => s.trim())
-            .filter(Boolean)
-            .reduce((m, pair) => {
-              const [id, idx] = pair.split(':');
-              const pid = Number(id);
-              const pidx = Number(idx);
-              if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
-              return m;
-            }, {});
-
-          const flagsFromLineItems = (items = []) => {
-            const flags = [false, false, false, false, false];
-            for (const li of (items || [])) {
-              const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
-              idsToCheck.forEach(id => {
-                const idx = campMap[id];
-                if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
-                  flags[idx] = true;
-                }
-              });
-            }
-            return flags;
-          };
-
-          const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
-          const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
-
-          // Build lookups OR-ing multiple orders
-          const emailToFlags = new Map();
-          const phoneToFlags = new Map();
-          for (const o of orders) {
-            const flags = flagsFromLineItems(o.line_items);
-            if (!flags.some(Boolean)) continue;
-            const em = getPlayerEmail(o);
-            const ph = getPlayerPhone(o);
-            if (em) {
-              const prev = emailToFlags.get(em) || [false,false,false,false,false];
-              emailToFlags.set(em, prev.map((v,i) => v || flags[i]));
-            }
-            if (ph) {
-              const prev = phoneToFlags.get(ph) || [false,false,false,false,false];
-              phoneToFlags.set(ph, prev.map((v,i) => v || flags[i]));
-            }
-          }
-
-          players = players.map(p => {
-            const hasRegs = Array.isArray(p.registeredCamps) && p.registeredCamps.some(Boolean);
-            if (hasRegs) return p;
-            const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
-            const ph = normalizePhone(p.mobilnummer || p.phone);
-            const byEmail = em && emailToFlags.get(em);
-            const byPhone = ph && phoneToFlags.get(ph);
-            const flags = byEmail || byPhone || null;
-            return (flags ? { ...p, registeredCamps: flags } : p);
-          });
-        }
-      } catch (e) {
-        console.warn('[PlayerList] registeredCamps enrichment skipped:', e?.message || e);
-      }
 
       // Fallback/komplettering (AVSTÄNGD som standard):
       // Kör alltid om färre än 130 spelare är laddade.
@@ -391,8 +327,8 @@ const PlayerList = () => {
         console.warn('[PlayerList] Fallback aktiverad: endast', players.length, 'spelare från /district/players. Kompletterar via Woo orders...');
         try {
           // Säsong (Aug 1 -> Aug 1)
-          const seasonStart = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z');
-          const seasonEnd   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z');
+          const seasonStart = new Date(SEASON_START);
+          const seasonEnd   = new Date(SEASON_END);
 
           // Slå upp DLT-kategori-ID från slug 'dlt' eller env
           const resolveIdFromSlug = async (slug) => {
@@ -402,7 +338,7 @@ const PlayerList = () => {
             const match = Array.isArray(r.data) ? r.data.find(x => x.slug === String(slug).trim()) : null;
             return match ? Number(match.id) : null;
           };
-          const dltCategoryId = await resolveIdFromSlug(process.env.REACT_APP_DLT_CATEGORY_ID || 'dlt');
+          const dltCategoryId = await resolveIdFromSlug(DLT_CATEGORY_ID);
 
           // Hämta alla ordrar för säsongen (completed,processing,on-hold)
           const orders = await fetchAllOrders({
@@ -437,7 +373,7 @@ const PlayerList = () => {
           };
 
           // Map product/variation -> camp index from ENV (e.g. "18611:0,19008:0,19009:0")
-          const campMap = (process.env.REACT_APP_CAMP_ID_MAP || '')
+          const campMap = (CAMP_ID_MAP_RAW || '')
             .split(',')
             .map(s => s.trim())
             .filter(Boolean)
@@ -560,10 +496,9 @@ const PlayerList = () => {
       // Hämta coachens favoriter
       let favSet = new Set();
       try {
-        const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
-        const scopes = apiScopeStr
-          ? apiScopeStr.split(',').map((s) => s.trim()).filter(Boolean)
-          : [`api://${process.env.REACT_APP_API_CLIENT_ID}/.default`];
+        const scopes = (API_SCOPE
+          ? API_SCOPE.split(',').map((s) => s.trim()).filter(Boolean)
+          : [`api://${API_CLIENT_ID}/.default`]);
 
         let headers = {};
         try {
@@ -746,10 +681,9 @@ const PlayerList = () => {
   // ---- Favorit-toggle -----------------------------------------------------------
   const toggleFavorite = useCallback(async (player) => {
     try {
-      const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
-      const scopes = apiScopeStr
-        ? apiScopeStr.split(',').map(s => s.trim()).filter(Boolean)
-        : [`api://${process.env.REACT_APP_API_CLIENT_ID}/.default`];
+      const scopes = (API_SCOPE
+        ? API_SCOPE.split(',').map(s => s.trim()).filter(Boolean)
+        : [`api://${API_CLIENT_ID}/.default`]);
 
       let headers = { 'Content-Type': 'application/json' };
       try {
@@ -787,10 +721,9 @@ const PlayerList = () => {
   // ---- Spara rating/kommentar --------------------------------------------------
   const savePlayerData = useCallback(async (playerId, data) => {
     try {
-      const apiScopeStr = process.env.REACT_APP_API_SCOPE || '';
-      const scopes = apiScopeStr
-        ? apiScopeStr.split(',').map(s => s.trim()).filter(Boolean)
-        : [`api://${process.env.REACT_APP_API_CLIENT_ID}/.default`];
+      const scopes = (API_SCOPE
+        ? API_SCOPE.split(',').map(s => s.trim()).filter(Boolean)
+        : [`api://${API_CLIENT_ID}/.default`]);
 
       let headers = { 'Content-Type': 'application/json' };
       try {
@@ -942,7 +875,7 @@ const PlayerList = () => {
           const regs = params.data?.registeredCamps;
           return (Array.isArray(regs) && regs[campIndex]) ? 'Ja' : 'Nej';
         },
-        width: 120
+        width: 130
       },
       {
         headerName: camp,
@@ -1006,7 +939,7 @@ const PlayerList = () => {
         ]
       }
     ])
-  ], [ratingAverageRenderer, calculateAverage, onCellValueChanged, HeartCell, colVisibility]);
+  ], [ratingAverageRenderer, calculateAverage, onCellValueChanged, colVisibility]);
 
   // ---- Filter “visa favoriter” --------------------------------------------------
   const displayRows = useMemo(() => {
@@ -1096,6 +1029,7 @@ const PlayerList = () => {
           </Popover>
           <Button ml='2' size='sm' variant='outline' onClick={() => {
             sessionStorage.removeItem(CACHE_KEY);
+            // keep overrides but refresh data
             fetchPlayers();
           }}>Uppdatera lista</Button>
         </Flex>
