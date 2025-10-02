@@ -235,6 +235,156 @@ const PlayerList = () => {
         console.warn('[PlayerList] T-shirt enrichment skipped:', e?.message || e);
       }
 
+      // --- Enrich missing registeredCamps from Woo (using ENV mapping) ---
+      try {
+        const needsRegs = (players || []).some(p => !Array.isArray(p.registeredCamps) || p.registeredCamps.every(v => !v));
+        if (needsRegs) {
+          const seasonStart = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z');
+          const seasonEnd   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z');
+
+          const orders = await fetchAllOrders({
+            status: 'completed,processing,on-hold',
+            after: seasonStart.toISOString(),
+            before: seasonEnd.toISOString()
+          });
+
+          const campMap = (process.env.REACT_APP_CAMP_ID_MAP || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .reduce((m, pair) => {
+              const [id, idx] = pair.split(':');
+              const pid = Number(id);
+              const pidx = Number(idx);
+              if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
+              return m;
+            }, {});
+
+          const flagsFromLineItems = (items = []) => {
+            const flags = [false, false, false, false, false];
+            for (const li of (items || [])) {
+              const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
+              idsToCheck.forEach(id => {
+                const idx = campMap[id];
+                if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
+                  flags[idx] = true;
+                }
+              });
+            }
+            return flags;
+          };
+
+          const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
+          const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
+
+          // Build lookups OR-ing multiple orders
+          const emailToFlags = new Map();
+          const phoneToFlags = new Map();
+          for (const o of orders) {
+            const flags = flagsFromLineItems(o.line_items);
+            if (!flags.some(Boolean)) continue;
+            const em = getPlayerEmail(o);
+            const ph = getPlayerPhone(o);
+            if (em) {
+              const prev = emailToFlags.get(em) || [false,false,false,false,false];
+              emailToFlags.set(em, prev.map((v,i) => v || flags[i]));
+            }
+            if (ph) {
+              const prev = phoneToFlags.get(ph) || [false,false,false,false,false];
+              phoneToFlags.set(ph, prev.map((v,i) => v || flags[i]));
+            }
+          }
+
+          players = players.map(p => {
+            const hasRegs = Array.isArray(p.registeredCamps) && p.registeredCamps.some(Boolean);
+            if (hasRegs) return p;
+            const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
+            const ph = normalizePhone(p.mobilnummer || p.phone);
+            const byEmail = em && emailToFlags.get(em);
+            const byPhone = ph && phoneToFlags.get(ph);
+            const flags = byEmail || byPhone || null;
+            return (flags ? { ...p, registeredCamps: flags } : p);
+          });
+        }
+      } catch (e) {
+        console.warn('[PlayerList] registeredCamps enrichment skipped:', e?.message || e);
+      }
+
+      // --- Enrich missing registeredCamps from Woo (using ENV mapping) ---
+      try {
+        const needsRegs = (players || []).some(p => !Array.isArray(p.registeredCamps) || p.registeredCamps.every(v => !v));
+        if (needsRegs) {
+          const seasonStart = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z');
+          const seasonEnd   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z');
+
+          const orders = await fetchAllOrders({
+            status: 'completed,processing,on-hold',
+            after: seasonStart.toISOString(),
+            before: seasonEnd.toISOString()
+          });
+
+          const campMap = (process.env.REACT_APP_CAMP_ID_MAP || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .reduce((m, pair) => {
+              const [id, idx] = pair.split(':');
+              const pid = Number(id);
+              const pidx = Number(idx);
+              if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
+              return m;
+            }, {});
+
+          const flagsFromLineItems = (items = []) => {
+            const flags = [false, false, false, false, false];
+            for (const li of (items || [])) {
+              const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
+              idsToCheck.forEach(id => {
+                const idx = campMap[id];
+                if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
+                  flags[idx] = true;
+                }
+              });
+            }
+            return flags;
+          };
+
+          const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
+          const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
+
+          // Build lookups OR-ing multiple orders
+          const emailToFlags = new Map();
+          const phoneToFlags = new Map();
+          for (const o of orders) {
+            const flags = flagsFromLineItems(o.line_items);
+            if (!flags.some(Boolean)) continue;
+            const em = getPlayerEmail(o);
+            const ph = getPlayerPhone(o);
+            if (em) {
+              const prev = emailToFlags.get(em) || [false,false,false,false,false];
+              emailToFlags.set(em, prev.map((v,i) => v || flags[i]));
+            }
+            if (ph) {
+              const prev = phoneToFlags.get(ph) || [false,false,false,false,false];
+              phoneToFlags.set(ph, prev.map((v,i) => v || flags[i]));
+            }
+          }
+
+          players = players.map(p => {
+            const hasRegs = Array.isArray(p.registeredCamps) && p.registeredCamps.some(Boolean);
+            if (hasRegs) return p;
+            const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
+            const ph = normalizePhone(p.mobilnummer || p.phone);
+            const byEmail = em && emailToFlags.get(em);
+            const byPhone = ph && phoneToFlags.get(ph);
+            const flags = byEmail || byPhone || null;
+            return (flags ? { ...p, registeredCamps: flags } : p);
+          });
+        }
+      } catch (e) {
+        console.warn('[PlayerList] registeredCamps enrichment skipped:', e?.message || e);
+      }
+
       // Fallback/komplettering (AVSTÄNGD som standard):
       // Kör alltid om färre än 130 spelare är laddade.
       if (players.length < 130) {
@@ -285,6 +435,42 @@ const PlayerList = () => {
             }
             return '';
           };
+
+          // Map product/variation -> camp index from ENV (e.g. "18611:0,19008:0,19009:0")
+          const campMap = (process.env.REACT_APP_CAMP_ID_MAP || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean)
+            .reduce((m, pair) => {
+              const [id, idx] = pair.split(':');
+              const pid = Number(id);
+              const pidx = Number(idx);
+              if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
+              return m;
+            }, {});
+
+          const flagsFromLineItems = (items = []) => {
+            const flags = [false, false, false, false, false];
+            for (const li of (items || [])) {
+              const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
+              idsToCheck.forEach(id => {
+                const idx = campMap[id];
+                if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
+                  flags[idx] = true;
+                }
+              });
+            }
+            return flags;
+          };
+
+          // Optional: infer gender from variation name if meta is missing
+          const inferGenderFromName = (name = '') => {
+            const n = String(name).toLowerCase();
+            if (/pojke|herr|boy|male/.test(n)) return 'Man/Pojke';
+            if (/flicka|dam|girl|female/.test(n)) return 'Kvinna/Flicka';
+            return '';
+          };
+
           ordersDLT.forEach(o => {
             const childName = getMetaDeep(o, ['dlt_spelarnamn','spelarnamn','spelarens_namn','barnets_namn']) ||
                               `${o?.billing?.first_name || ''} ${o?.billing?.last_name || ''}`.trim();
@@ -302,7 +488,9 @@ const PlayerList = () => {
               'spelarens_mejl'
             ]);
             const konRaw = getMetaDeep(o, ['dlt_kon','kon','gender','kön','barnets_kön']) || '';
-            const kon = /kvinna|flicka|female|f/i.test(konRaw) ? 'Kvinna/Flicka' : (/man|pojke|male|m/i.test(konRaw) ? 'Man/Pojke' : '');
+            const lineName = (o?.line_items && o.line_items[0] && o.line_items[0].name) ? o.line_items[0].name : '';
+            let kon = /kvinna|flicka|female|f/i.test(konRaw) ? 'Kvinna/Flicka' : (/man|pojke|male|m/i.test(konRaw) ? 'Man/Pojke' : '');
+            if (!kon) kon = inferGenderFromName(lineName);
             const alderspelare = getMetaDeep(o, ['dlt_alderspelare','fodelsear','födelseår','birthyear']) || '';
             const klubblag = getMetaDeep(o, ['dlt_klubblag','klubblag','klubb']) || '';
             const basket_position = getMetaDeep(o, ['dlt_basket_position','basket_position','position']) || '';
@@ -330,7 +518,7 @@ const PlayerList = () => {
               email: parentEmail,
               phone: parentPhone,
               attributes: flattenAttrs(o.line_items),
-              registeredCamps: [false,false,false,false,false],
+              registeredCamps: flagsFromLineItems(o.line_items),
               ratings: [{},{},{},{},{}],
               comments: [
                 { value:'', by:'', timestamp:'' },

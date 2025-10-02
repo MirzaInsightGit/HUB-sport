@@ -2,13 +2,128 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { getMyOid, getMyDisplayName } from '../utils/auth';
 
-// Lightweight logger
-const log = (...args) => (process.env.NODE_ENV !== 'production' ? console.debug('[chatService]', ...args) : undefined);
+// Lightweight logger (no-op in production)
+const log = (...args) => {
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production') return;
+    // eslint-disable-next-line no-console
+    console.log('[chat]', ...args);
+  } catch {}
+};
 
-const authHeaders = () => ({ Authorization: `Bearer ${getToken()}` });
+// --- MSAL-safe token/claims helpers (robusta mot olika cacheformat) ---
+function b64Decode(payload) {
+  try {
+    const s = payload.replace(/-/g, '+').replace(/_/g, '/');
+    return decodeURIComponent(
+      atob(s).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')
+    );
+  } catch { return ''; }
+}
 
-const getToken = () => localStorage.getItem('access_token') || localStorage.getItem('id_token') || '';
-const ME = { oid: getMyOid && getMyOid(), name: getMyDisplayName && getMyDisplayName() };
+function decodeJwt(token) {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return {};
+    const json = b64Decode(part);
+    return JSON.parse(json || '{}');
+  } catch { return {}; }
+}
+
+function readFromStore(store, credentialType) {
+  try {
+    for (let i = 0; i < store.length; i++) {
+      const k = store.key(i);
+      if (!k) continue;
+      if (!/^[\w.\-:]+$/.test(k)) continue;
+      const raw = store.getItem(k);
+      if (!raw) continue;
+      if (raw[0] !== '{' && raw[0] !== '[') continue;
+
+      let obj;
+      try { obj = JSON.parse(raw); } catch { continue; }
+
+      // Direct MSAL credential object
+      if (obj && typeof obj === 'object' && obj.credentialType && obj.secret) {
+        if (String(obj.credentialType).toLowerCase() === String(credentialType).toLowerCase()) {
+          return obj.secret;
+        }
+      }
+
+      // MSAL "token keys" list that points to other keys
+      if (Array.isArray(obj) && obj.length && String(credentialType).toLowerCase() === 'idtoken') {
+        for (const refKey of obj) {
+          try {
+            const v = store.getItem(refKey);
+            const vo = v && v[0] === '{' ? JSON.parse(v) : null;
+            if (vo && vo.credentialType && vo.secret && String(vo.credentialType).toLowerCase() === 'idtoken') {
+              return vo.secret;
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+  return '';
+}
+
+function readMsalToken(credentialType) {
+  // Prefer sessionStorage (MSAL default), then localStorage as fallback
+  if (typeof sessionStorage !== 'undefined') {
+    const hit = readFromStore(sessionStorage, credentialType);
+    if (hit) return hit;
+  }
+  if (typeof localStorage !== 'undefined') {
+    const hit = readFromStore(localStorage, credentialType);
+    if (hit) return hit;
+  }
+  return '';
+}
+
+function getIdToken() {
+  const msalId = readMsalToken('IdToken');
+  if (msalId) return msalId;
+  const fromLocal = localStorage.getItem('id_token');
+  if (fromLocal) return fromLocal;
+  return '';
+}
+
+function getAccessToken() {
+  const msalAcc = readMsalToken('AccessToken');
+  if (msalAcc) return msalAcc;
+  const fromLocal = localStorage.getItem('access_token');
+  if (fromLocal) return fromLocal;
+  return '';
+}
+
+function getClaims() {
+  const id = getIdToken();
+  if (!id) return {};
+  return decodeJwt(id) || {};
+}
+
+function getNameFromClaims(c) {
+  return (
+    c.name ||
+    (c.given_name && c.family_name ? `${c.given_name} ${c.family_name}`.trim() : '') ||
+    c.preferred_username ||
+    c.upn ||
+    ''
+  );
+}
+
+const getToken = () => getAccessToken() || getIdToken() || '';
+
+const _claims = getClaims();
+const ME = {
+  oid: (_claims.oid || _claims.sub || _claims.objectId || (getMyOid && getMyOid())) || '',
+  name: (getNameFromClaims(_claims) || (getMyDisplayName && getMyDisplayName())) || ''
+};
+
+const authHeaders = () => {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
 
 // Keep a short-lived cache of messages we sent (to help right-align history while backend rollout settles)
 const SENT_CACHE = [];
@@ -22,7 +137,6 @@ const rememberSent = (m) => {
 };
 
 // --- Chat helpers ---
-const getUserId = (u) => u?.oid || u?.sub || u?.id || u?.objectId || u?.preferred_username || u?.upn || u?.name || 'guest';
 
 // Normalizers
 const normalizeUsers = (data) => {
@@ -146,7 +260,7 @@ const onNoop = () => noop;
 
 export const sendMessage = async (groupId, message) => {
   if (!groupId || !message) return;
-  const body = { message };
+  const body = { message, senderId: ME.oid, senderName: ME.name };
 
   // optimistic local echo + heuristic cache
   const optimistic = normalizeMessage({
@@ -235,8 +349,10 @@ export const fetchUsers = async () => {
 // Alias: semantic name used by UI components
 export const listChatUsers = fetchUsers;
 
-export const createGroup = async (name, members) => {
-  const body = { name, members };
+export const createGroup = async (name, members = []) => {
+  // Always include the current user (ME.oid) in the group
+  const normalizedMembers = Array.from(new Set([ME.oid, ...members.filter(Boolean)]));
+  const body = { name, members: normalizedMembers,createdBy: ME.oid,createdByName: ME.name };
   try {
     const { data } = await axios.post(`${CHAT_API}/groups`, body, { headers: authHeaders() });
     return data;
@@ -295,7 +411,6 @@ export const fetchMessages = async (groupId) => {
     `${CHAT_API}/groups/${groupId}/messages?limit=50`,
     `${API_BASE}/groups/${groupId}/messages?limit=50`
   ];
-  let lastErr;
   for (const p of paths) {
     try {
       const { data } = await axios.get(p, { headers: authHeaders() });
@@ -312,7 +427,6 @@ export const fetchMessages = async (groupId) => {
         return data.value.map(normalizeMessage);
       }
     } catch (e) {
-      lastErr = e;
       log('fetchMessages failed on', p, e?.response?.status || e?.message);
     }
   }
