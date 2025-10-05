@@ -3,7 +3,7 @@ import { AgGridReact } from 'ag-grid-react';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import axios from 'axios';
-import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Box, useDisclosure, Spinner, Checkbox, Popover, PopoverTrigger, PopoverContent, PopoverArrow, PopoverBody, PopoverCloseButton, useToast } from "@chakra-ui/react";
+import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Box, useDisclosure, Spinner, Checkbox, Popover, PopoverTrigger, PopoverContent, PopoverArrow, PopoverBody, PopoverCloseButton, useToast, Switch } from "@chakra-ui/react";
 import { useMsal } from "@azure/msal-react";
 import { API_BASE } from '../../config/apiBase';
 
@@ -16,7 +16,36 @@ const DLT_CATEGORY_ID = process.env.REACT_APP_DLT_CATEGORY_ID || 'dlt';
 const CAMP_ID_MAP_RAW = process.env.REACT_APP_CAMP_ID_MAP     || '';
 const SEASON_START    = process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z';
 const SEASON_END      = process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z';
+// Build MSAL scopes safely (avoid "api:///.default" when env is missing)
+const buildScopes = () => {
+  if (API_SCOPE && String(API_SCOPE).trim()) {
+    return String(API_SCOPE)
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+  if (API_CLIENT_ID && String(API_CLIENT_ID).trim()) {
+    return [`api://${API_CLIENT_ID}/.default`];
+  }
+  return [];
+};
 // ------------------------------------------------------------------------------
+
+// --- Player id helpers (prefer child's email, then parent email, then legacy id) -----
+const preferredPlayerId = (p = {}) => {
+  const child = (p.spelarmejl || '').trim();
+  const parent = (p.email || '').trim();
+  const legacy = (p.id || '').trim();
+  return child || parent || legacy;
+};
+const idCandidates = (p = {}) => {
+  const uniq = new Set(
+    [p.spelarmejl, p.email, p.legacyId, p.parentEmail, p.id]
+      .map(x => (x || '').toString().trim())
+      .filter(Boolean)
+  );
+  return Array.from(uniq);
+};
 
 // --- Local session cache helpers (JS) -----------------------------------------
 const __CACHE_NS = 'hub-cache.v2';
@@ -127,6 +156,8 @@ const PlayerList = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [favorites, setFavorites] = useState(new Set());
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
+  // keep track of favorites currently being saved to avoid double-click confusion
+  const [pendingFavIds, setPendingFavIds] = useState(new Set());
   const gridRef = useRef();
   const [isLoading, setIsLoading] = useState(false);
   const [loadedCount, setLoadedCount] = useState(0);
@@ -138,6 +169,7 @@ const PlayerList = () => {
 
   // Persistenta kolumnval per coach
   const coachId = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+  if (typeof window !== 'undefined') window.__coachId = coachId;
   const tenantId = TENANT_ID;
   const COL_KEY = `playerlist.columns.v1::${coachId}`;
   const CACHE_KEY = makeKey('playerlist', coachId, tenantId);
@@ -496,14 +528,13 @@ const PlayerList = () => {
       // Hämta coachens favoriter
       let favSet = new Set();
       try {
-        const scopes = (API_SCOPE
-          ? API_SCOPE.split(',').map((s) => s.trim()).filter(Boolean)
-          : [`api://${API_CLIENT_ID}/.default`]);
-
+        const scopes = buildScopes();
         let headers = {};
         try {
-          const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
-          if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
+          if (scopes.length > 0) {
+            const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
+            if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
+          }
         } catch (_) { /* dev utan token */ }
         headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
 
@@ -587,7 +618,25 @@ const PlayerList = () => {
             : '')
         );
 
+        // --- Stable id for favorites & Cosmos ---
+        const safeSlug = (s = '') => String(s).toLowerCase().trim()
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, '');
+        const emailKeyLower = (spelarmejl || '').toLowerCase();
+        const phoneKey = normalizePhone(mobilnummer || '');
+        // Bygg alltid ett id där spelarens mejl prioriteras, sedan telefon, sedan namnbaserad fallback
+        const computedId = emailKeyLower
+          || (phoneKey ? `p_${phoneKey}` : `k_${(p.alderspelare||'')}_${safeSlug(p.spelarnamn)}_${safeSlug(p.klubblag)}_${safeSlug(p.aktuellserie)}`);
+
+        // Spara även gamla nycklar så favoriter och äldre poster fortfarande kan kännas igen
+        const parentEmailLower = (p.email || '').toLowerCase();
+        const legacyId = p.id || '';
+        const finalId = computedId || (legacyId ? String(legacyId).toLowerCase() : '');
+
         return {
+          id: finalId,             // alltid spelarens mejl om vi har den
+          legacyId,                // gamla id:t (t.ex. o_19146 eller förälders mejl)
+          parentEmail: parentEmailLower,
           ...p,
           registeredCamps: regs,
           ratings,
@@ -598,7 +647,14 @@ const PlayerList = () => {
           tshirt_storlek: tshirt
         };
       };
-      const playersWithFav = (players || []).map((p) => ({ ...normalize(p), isFavorite: favSet.has(p.id) }));
+      const playersWithFav = (players || []).map((p) => {
+        const n = normalize(p);
+        const fav =
+          favSet.has(n.id) ||
+          (n.legacyId && favSet.has(n.legacyId)) ||
+          (n.parentEmail && favSet.has(n.parentEmail));
+        return { ...n, isFavorite: fav };
+      });
       console.log('[PlayerList] total players loaded:', playersWithFav.length);
       // Dedupe per spelare: robust gruppnyckel (email, annars phone, annars year, annars name)
       const richness = (p) => [p.spelarmejl,p.mobilnummer,p.tshirt_storlek,p.klubblag,p.basket_position,p.aktuellserie].filter(x => x && String(x).trim()).length;
@@ -678,67 +734,280 @@ const PlayerList = () => {
     applyVisibilityToGrid();
   }, [applyVisibilityToGrid]);
 
+  // ---- Favorit-cache sync helper ------------------------------------------------
+  const updateCacheAfterFavorite = useCallback((playerId, isFav) => {
+    try {
+      const cached = getCache(CACHE_KEY);
+      if (cached && Array.isArray(cached.rows)) {
+        const rows = cached.rows.map(r => (r.id === playerId ? { ...r, isFavorite: isFav } : r));
+        // reuse same TTL window (10 minutes)
+        setCache(CACHE_KEY, { rows }, 10 * 60 * 1000);
+      }
+    } catch (_) {}
+  }, [CACHE_KEY]);
+
   // ---- Favorit-toggle -----------------------------------------------------------
   const toggleFavorite = useCallback(async (player) => {
-    try {
-      const scopes = (API_SCOPE
-        ? API_SCOPE.split(',').map(s => s.trim()).filter(Boolean)
-        : [`api://${API_CLIENT_ID}/.default`]);
+    const scopes = buildScopes();
 
-      let headers = { 'Content-Type': 'application/json' };
-      try {
+    // prevent spamming the same row while request is in flight
+    setPendingFavIds(prev => new Set(prev).add(player.id));
+
+    // compute current value from the row (source of truth) to avoid stale Set
+    const currentlyFav = !!player.isFavorite;
+
+    // build headers (MSAL token if available)
+    let headers = { 'Content-Type': 'application/json' };
+    try {
+      if (scopes.length > 0) {
         const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
         if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
-      } catch (_) { /* dev utan token */ }
-      headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+      }
+    } catch (_) { /* dev without token */ }
+    headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
 
-      if (favorites.has(player.id)) {
-        await fetch(`${API_BASE}/favorites`, {
-          method: 'DELETE',
-          headers,
-          body: JSON.stringify({ playerId: player.id })
-        });
-        const next = new Set(favorites);
-        next.delete(player.id);
-        setFavorites(next);
-        setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: false } : r));
+    // --- Optimistic UI update: flip local state immediately ---
+    setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: !currentlyFav } : r));
+    // keep session cache in sync
+    updateCacheAfterFavorite(player.id, !currentlyFav);
+    try {
+      const api = gridRef.current?.api;
+      const node = api?.getRowNode(player.id);
+      if (node) {
+        node.setData({ ...node.data, isFavorite: !currentlyFav });
+        api.refreshCells({ force: true, columns: ['fav'], rowNodes: [node] });
+        if (showOnlyFavorites) api.refreshClientSideRowModel('filter');
       } else {
-        await fetch(`${API_BASE}/favorites`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ playerId: player.id })
-        });
-        const next = new Set(favorites);
-        next.add(player.id);
-        setFavorites(next);
-        setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: true } : r));
+        gridRef.current?.api?.refreshCells({ force: true, columns: ['fav'] });
+      }
+    } catch (_) {}
+
+    // also update the Set used by filters/buttons
+    setFavorites(prev => {
+      const next = new Set(prev);
+      if (currentlyFav) next.delete(player.id); else next.add(player.id);
+      return next;
+    });
+
+    // --- Persist to backend ---
+    let finalOk = false;
+    try {
+      const payload = { playerId: player.id, favorite: !currentlyFav };
+      let res = await fetch(`${API_BASE}/favorites/toggle`, { method: 'POST', headers, body: JSON.stringify(payload) });
+
+      if (!res.ok) {
+        if (currentlyFav) {
+          // explicit remove fallbacks
+          res = await fetch(`${API_BASE}/favorites/remove`, { method: 'POST', headers, body: JSON.stringify({ playerId: player.id }) });
+          if (!res.ok) {
+            const url = `${API_BASE}/favorites?playerId=${encodeURIComponent(player.id)}`;
+            res = await fetch(url, { method: 'DELETE', headers });
+          }
+        } else {
+          // legacy add endpoint
+          res = await fetch(`${API_BASE}/favorites`, { method: 'POST', headers, body: JSON.stringify({ playerId: player.id }) });
+        }
+      }
+
+      if (res.ok) {
+        finalOk = true;
+        // try to respect server response if it returns the new value
+        try {
+          const json = await res.json();
+          const newVal = typeof json?.favorite === 'boolean' ? json.favorite : !currentlyFav;
+          setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: newVal } : r));
+          updateCacheAfterFavorite(player.id, newVal);
+          const api = gridRef.current?.api;
+          const node = api?.getRowNode(player.id);
+          if (node) {
+            node.setData({ ...node.data, isFavorite: newVal });
+            api.refreshCells({ force: true, columns: ['fav'], rowNodes: [node] });
+            if (showOnlyFavorites) api.refreshClientSideRowModel('filter');
+          }
+          setFavorites(prev => {
+            const s = new Set(prev);
+            if (newVal) s.add(player.id); else s.delete(player.id);
+            return s;
+          });
+        } catch (_) { /* server returned no JSON */ }
       }
     } catch (e) {
       console.error('Toggle favorite failed:', e);
+    } finally {
+      setPendingFavIds(prev => { const n = new Set(prev); n.delete(player.id); return n; });
     }
-  }, [instance, accounts, favorites]);
+
+    // --- Revert on failure ---
+    if (!finalOk) {
+      setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: currentlyFav } : r));
+      updateCacheAfterFavorite(player.id, currentlyFav);
+      setFavorites(prev => {
+        const s = new Set(prev);
+        if (currentlyFav) s.add(player.id); else s.delete(player.id);
+        return s;
+      });
+      try {
+        const api = gridRef.current?.api;
+        const node = api?.getRowNode(player.id);
+        if (node) {
+          node.setData({ ...node.data, isFavorite: currentlyFav });
+          api.refreshCells({ force: true, columns: ['fav'], rowNodes: [node] });
+          if (showOnlyFavorites) api.refreshClientSideRowModel('filter');
+        }
+      } catch (_) {}
+    }
+  }, [instance, accounts, showOnlyFavorites, updateCacheAfterFavorite]);
 
   // ---- Spara rating/kommentar --------------------------------------------------
   const savePlayerData = useCallback(async (playerId, data) => {
-    try {
-      const scopes = (API_SCOPE
-        ? API_SCOPE.split(',').map(s => s.trim()).filter(Boolean)
-        : [`api://${API_CLIENT_ID}/.default`]);
+    // Helpers to sanitize payload to exactly 5 camps and plain JSON-safe values
+    const ensureLen5 = (arr, fillerFactory) => {
+      const out = Array.isArray(arr) ? arr.slice(0, 5) : [];
+      while (out.length < 5) out.push(fillerFactory());
+      return out;
+    };
+    const cleanRating = (r = {}) => {
+      const o = {};
+      // only allow known keys with A-F
+      const grade = (v) => {
+        const s = String(v || '').trim().toUpperCase();
+        return ['A', 'B', 'C', 'D', 'E', 'F'].includes(s) ? s : undefined;
+      };
+      o.bollkontroll   = grade(r.bollkontroll)   || undefined;
+      o.forsvar        = grade(r.forsvar)        || undefined;
+      o.anfall         = grade(r.anfall)         || undefined;
+      o.kommunikation  = grade(r.kommunikation)  || undefined;
+      o.sociala        = grade(r.sociala)        || undefined;
+      o.styrka         = grade(r.styrka)         || undefined;
+      o.spelforstaelse = grade(r.spelforstaelse) || undefined;
+      if (r.by) o.by = String(r.by);
+      if (r.timestamp) o.timestamp = String(r.timestamp);
+      // strip undefined keys
+      Object.keys(o).forEach(k => o[k] === undefined && delete o[k]);
+      return o;
+    };
+    const cleanComment = (c = {}) => ({
+      value: String(c.value || ''),
+      by: String(c.by || ''),
+      timestamp: String(c.timestamp || '')
+    });
 
-      let headers = { 'Content-Type': 'application/json' };
-      try {
+    const ratings5  = ensureLen5(data?.ratings,  () => ({})).map(cleanRating);
+    const comments5 = ensureLen5(data?.comments, () => ({ value:'', by:'', timestamp:'' })).map(cleanComment);
+
+    // Build a robust, player-centric id and fallbacks (legacy ids)
+    const effectiveId = preferredPlayerId(data);
+    const candidates  = idCandidates(data);
+
+    const coachIdHdr = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+
+    const payload = {
+      playerId: effectiveId,
+      coachId: coachIdHdr,
+      tenantId: TENANT_ID,
+      ratings: ratings5,
+      comments: comments5,
+      idCandidates: candidates
+    };
+
+    // headers (MSAL token if available)
+    const scopes = buildScopes();
+    let headers = { 'Content-Type': 'application/json' };
+    try {
+      if (scopes.length > 0) {
         const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
         if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
-      } catch (_) { /* fallback dev-mode */ }
+      }
+    } catch (_) {/* dev without token */}
+    headers['x-dev-coachid'] = coachIdHdr;
+    headers['x-tenant-id']   = TENANT_ID;
+    headers['x-client']      = 'playerlist';
 
-      console.log('⬆️ POST /ratings sending:', { playerId, data, headers });
+    const baseUrl = `${API_BASE}/district/players/${encodeURIComponent(effectiveId)}/ratings`;
 
-      const response = await axios.post(`${API_BASE}/district/players/${playerId}/ratings`, data, { headers });
-      console.log('✔️ Betyg sparat:', response.data);
-    } catch (err) {
-      console.error('❌ Kunde inte spara betyg:', err?.response?.data || err.message);
+    const tryPut = async () => fetch(baseUrl, { method: 'PUT', headers, body: JSON.stringify(payload) });
+
+    let res = null;
+    let resText = '';
+    try {
+      res = await tryPut();
+      if (!res.ok && res.status === 404 && Array.isArray(candidates) && candidates.length) {
+        // migrate once using the best legacy id (different from effectiveId)
+        const legacy = candidates.find(x => (x || '').trim().toLowerCase() !== (effectiveId || '').trim().toLowerCase());
+        if (legacy) {
+          try {
+            await fetch(`${API_BASE}/district/players/${encodeURIComponent(effectiveId)}/ratings/migrate`, {
+              method: 'POST', headers, body: JSON.stringify({ legacyId: legacy })
+            });
+          } catch (_) {/* ignore migrate failure */}
+          res = await tryPut();
+        }
+      }
+
+      // If backend still responds 500, retry once with a strictly minimal sanitized payload
+      if (!res.ok && res.status === 500) {
+        const minimal = {
+          ratings: ratings5,
+          comments: comments5,
+          idCandidates: candidates
+        };
+        res = await fetch(baseUrl, { method: 'PUT', headers, body: JSON.stringify(minimal) });
+      }
+
+      if (!res.ok) {
+        try { resText = await res.text(); } catch (_) { /* ignore */ }
+      }
+    } catch (e) {
+      console.error('Save ratings network error:', e);
     }
-  }, [instance, accounts]);
+
+    if (!res || !res.ok) {
+      console.error('❌ Save ratings failed', res?.status, resText || res);
+      toast({
+        title: 'Kunde inte spara betyg',
+        description: resText ? `Server: ${resText}` : 'Kontrollera nätverk/behörighet – försök igen.',
+        status: 'error',
+        duration: 3500,
+        isClosable: true,
+        position: 'bottom-right'
+      });
+      return;
+    }
+
+    // If server returns the saved doc, sync local state + session cache
+    try {
+      const saved = await res.json();
+      if (saved && (saved.ratings || saved.comments)) {
+        // Update rows in memory
+        setRowData(prev => prev.map(r => {
+          const rid = preferredPlayerId(r);
+          return rid === effectiveId ? {
+            ...r,
+            ratings: Array.isArray(saved.ratings) ? saved.ratings : r.ratings,
+            comments: Array.isArray(saved.comments) ? saved.comments : r.comments,
+            id: saved.id || r.id
+          } : r;
+        }));
+
+        // Update session cache
+        const cached = getCache(CACHE_KEY);
+        if (cached && Array.isArray(cached.rows)) {
+          const rows = cached.rows.map(r => {
+            const rid = preferredPlayerId(r);
+            return rid === effectiveId ? {
+              ...r,
+              ratings: Array.isArray(saved.ratings) ? saved.ratings : r.ratings,
+              comments: Array.isArray(saved.comments) ? saved.comments : r.comments,
+              id: saved.id || r.id
+            } : r;
+          });
+          setCache(CACHE_KEY, { rows }, 10 * 60 * 1000);
+        }
+      }
+    } catch (_) {
+      // No JSON or parse error – ignore, state already updated in the grid
+    }
+  }, [instance, accounts, CACHE_KEY]);
 
   // ---- Grid handlers ------------------------------------------------------------
   const onCellValueChanged = useCallback(async (params) => {
@@ -780,12 +1049,13 @@ const PlayerList = () => {
     }
 
     if (needSave) {
+      const row = params.data;
       const item = {
-        id: params.data.id,
-        ratings: params.data.ratings,
-        comments: params.data.comments
+        ...row,
+        ratings: row.ratings,
+        comments: row.comments
       };
-      await savePlayerData(params.data.id, item);
+      await savePlayerData(preferredPlayerId(row), item);
     }
   }, [currentUser, savePlayerData]);
 
@@ -834,26 +1104,46 @@ const PlayerList = () => {
     applyVisibilityToGrid();
   };
 
-  // ---- Heart cell ---------------------------------------------------------------
-  const HeartCell = useCallback((props) => {
-    const isFav = props.data?.isFavorite;
-    const onClick = () => toggleFavorite(props.data);
+  // ---- Favorite toggle cell (Switch) ------------------------------------------
+  const FavoriteToggleCell = useCallback((props) => {
+    const id = props.data?.id;
+    const isFav = !!props.data?.isFavorite;
+    const isBusy = pendingFavIds.has(id);
+
+    const handleChange = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!isBusy) toggleFavorite(props.data);
+    };
+
     return (
-      <span style={{ cursor: 'pointer', fontSize: '18px' }} onClick={onClick}>
-        {isFav ? '❤️' : '🤍'}
-      </span>
+      <Flex align="center" justify="center" h="100%">
+        <Switch
+          isChecked={isFav}
+          onChange={handleChange}
+          isDisabled={isBusy}
+          size="lg"
+          colorScheme="red"
+          aria-label={isFav ? 'Ta bort som favorit' : 'Spara som favorit'}
+        />
+      </Flex>
     );
-  }, [toggleFavorite]);
+  }, [toggleFavorite, pendingFavIds]);
 
   // ---- Column defs --------------------------------------------------------------
   const columnDefs = useMemo(() => [
     {
-      headerName: '❤',
+      headerName: 'Favorit',
       colId: 'fav',
-      width: 80,
+      width: 110,
       pinned: 'left',
       hide: !colVisibility['fav'],
-      cellRenderer: HeartCell
+      editable: false,
+      suppressCellFocus: true,
+      valueGetter: (params) => !!params.data?.isFavorite,
+      cellRenderer: FavoriteToggleCell,
+      cellRendererParams: { suppressReactFrameworkComponentRecreation: false },
+      volatile: true,
     },
     { headerName: 'Spelarnamn', colId: 'spelarnamn', field: 'spelarnamn', sortable: true, filter: true, pinned: 'left', hide: !colVisibility['spelarnamn'] },
     { headerName: 'Kön', colId: 'kon', field: 'kon', sortable: true, filter: true, hide: !colVisibility['kon'] },
@@ -886,6 +1176,7 @@ const PlayerList = () => {
             editable: (params) => !!params.data?.registeredCamps?.[campIndex],
             cellEditor: 'agSelectCellEditor',
             cellEditorParams: { values: ['A', 'B', 'C', 'D', 'E', 'F'] },
+            singleClickEdit: true,
             valueGetter: (params) => {
               const ratings = params.data?.ratings;
               if (!Array.isArray(ratings) || !ratings[campIndex]) return 'F';
@@ -896,6 +1187,10 @@ const PlayerList = () => {
               if (!params.data.ratings[campIndex]) params.data.ratings[campIndex] = {};
               params.data.ratings[campIndex][cat] = params.newValue;
               return true;
+            },
+            valueParser: (params) => {
+              const v = (params.newValue || '').toString().trim().toUpperCase();
+              return ['A','B','C','D','E','F'].includes(v) ? v : 'F';
             },
             onCellValueChanged,
             campIndex,
@@ -909,6 +1204,8 @@ const PlayerList = () => {
           },
           {
             headerName: 'Kommentarer',
+            colId: `comments_${campIndex}`,
+            singleClickEdit: true,
             editable: (params) => !!params.data?.registeredCamps?.[campIndex],
             cellEditor: 'agLargeTextCellEditor',
             cellRenderer: (params) => commentsRenderer(params, campIndex),
@@ -1073,6 +1370,11 @@ const PlayerList = () => {
           stopEditingWhenCellsLoseFocus={true}
           onGridReady={onGridReady}
           onFirstDataRendered={onFirstDataRendered}
+          suppressClickEdit={false}
+          suppressRowClickSelection={true}
+          rowSelection={undefined}
+          getRowId={(params) => String(params.data?.id)}
+          immutableData={true}
         />
       </div>
 
