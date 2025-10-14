@@ -2,6 +2,8 @@ import {
   Box,
   Flex,
   Icon,
+  Grid,
+  GridItem,
   SimpleGrid,
   useColorModeValue,
   Text,
@@ -15,6 +17,7 @@ import {
   CardHeader,
   CardBody,
   Button,
+  Progress,
 } from "@chakra-ui/react";
 // Custom components
 import MiniStatistics from "components/card/MiniStatistics";
@@ -62,8 +65,13 @@ const DLT_BUDGET = Number(process.env.REACT_APP_DLT_BUDGET) || 250000;
 const DLT_CATEGORY_ID = process.env.REACT_APP_DLT_CATEGORY_ID || 'dlt'; // WooCommerce category slug/ID for DLT
 const DLT_TAG_ID = process.env.REACT_APP_DLT_TAG_ID || null; // WooCommerce product tag id/slug for DLT
 
+
 const DLT_SEASON_START = new Date(process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00');
 const DLT_SEASON_END   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59');
+
+// --- Camp capacity config (frontend fallback) ---
+const CAMP_CAPACITY = { 'Läger 1': 176, 'Läger 2': 176, 'Läger 3': 176 };
+const CAMP_TOTAL_CAP = Object.values(CAMP_CAPACITY).reduce((a, b) => a + b, 0);
 
 export default function UserReports() {
   // Chakra Color Mode
@@ -100,6 +108,13 @@ export default function UserReports() {
     series: [],
     tshirts: [],
     products: [],
+    camps: [],
+  });
+
+  // Aggregerad lägerstatistik (antal, kapacitet, %, lediga)
+  const [campStats, setCampStats] = useState({
+    total: { count: 0, capacity: CAMP_TOTAL_CAP, percent: 0, remaining: CAMP_TOTAL_CAP },
+    camps: [],
   });
 
   // ---- Helpers for DLT filtering ----
@@ -150,9 +165,10 @@ export default function UserReports() {
     if (Array.isArray(dltProductIds) && dltProductIds.length) {
       return dltProductIds.includes(item.product_id);
     }
-    // If we don't have product ids, try fuzzy match on name (last resort)
+    // No product id resolution => be permissive; allow camp mapping to decide
     const n = (item.name || "").toLowerCase();
-    return n.includes("dlt");
+    if (n.includes("dlt") || /(läger|lager|camp|tryout)/.test(n)) return true;
+    return true;
   };
 
   const extractGenderFromMeta = (meta = []) => {
@@ -221,6 +237,86 @@ export default function UserReports() {
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   };
 
+  // --- Normalize basketball positions ---
+  const normalizePositions = (entries) => {
+    const base = new Map([
+      ['Point Guard', 0],
+      ['Shooting Guard', 0],
+      ['Small Forward', 0],
+      ['Power Forward', 0],
+      ['Center', 0],
+    ]);
+    (entries || []).forEach(([raw, count]) => {
+      const l = String(raw || '').toLowerCase();
+      if (l.includes('point')) base.set('Point Guard', base.get('Point Guard') + count);
+      else if (l.includes('shoot')) base.set('Shooting Guard', base.get('Shooting Guard') + count);
+      else if (l.includes('small')) base.set('Small Forward', base.get('Small Forward') + count);
+      else if (l.includes('power')) base.set('Power Forward', base.get('Power Forward') + count);
+      else if (l.includes('center') || l === 'c') base.set('Center', base.get('Center') + count);
+    });
+    return Array.from(base.entries());
+  };
+
+  const tallyCampsWithCapacity = (orders) => {
+    // Keys we accept for camp detection in order or line-item meta
+    const campKeys = [
+      'dlt_lager','dlt_läger','lager','läger','camp','tryout',
+      'camp_name','campname','lagernamn','lägernamn','läger namn','läger-nummer','lager-nummer'
+    ];
+
+    // Helpers
+    const lcSet = new Set(campKeys.map(k => String(k).toLowerCase()));
+    const getCampFromMeta = (meta) => {
+      for (const m of meta || []) {
+        const k = String(m?.key || '').toLowerCase();
+        if (lcSet.has(k)) {
+          const v = String(m?.value || '').trim();
+          if (v) return v;
+        }
+      }
+      return '';
+    };
+    const getCampFromName = (name) => {
+      const n = String(name || '').toLowerCase();
+      // ex: "DLT Läger 1", "Tryout - Läger 2", etc.
+      const m = n.match(/läger\s*(1|2|3)/i) || n.match(/lager\s*(1|2|3)/i) || n.match(/camp\s*(1|2|3)/i);
+      if (m) return `Läger ${m[1]}`;
+      return '';
+    };
+
+    const counts = new Map(Object.keys(CAMP_CAPACITY).map(k => [k, 0]));
+
+    (orders || []).forEach((o) => {
+      // First, try order-level meta for a default camp
+      const orderCamp = getCampFromMeta(o?.meta_data);
+
+      (o?.line_items || []).forEach((li) => {
+        const qty = Number(li?.quantity || 0);
+        if (!qty) return;
+        // Priority: line-item meta -> order meta -> product name regex
+        const liCamp = getCampFromMeta(li?.meta_data) || orderCamp || getCampFromName(li?.name);
+        const key = CAMP_CAPACITY[liCamp] != null ? liCamp : '';
+        if (key) counts.set(key, (counts.get(key) || 0) + qty);
+      });
+    });
+
+    const perCamp = Object.entries(CAMP_CAPACITY).map(([name, cap]) => {
+      const count = counts.get(name) || 0;
+      const percent = cap > 0 ? Math.min(100, Math.round((count / cap) * 100)) : 0;
+      const remaining = Math.max(0, cap - count);
+      return { name, count, capacity: cap, percent, remaining };
+    });
+
+    const totalCount = perCamp.reduce((a, c) => a + c.count, 0);
+    const totalPercent = CAMP_TOTAL_CAP > 0 ? Math.min(100, Math.round((totalCount / CAMP_TOTAL_CAP) * 100)) : 0;
+    const totalRemaining = Math.max(0, CAMP_TOTAL_CAP - totalCount);
+
+    return {
+      total: { count: totalCount, capacity: CAMP_TOTAL_CAP, percent: totalPercent, remaining: totalRemaining },
+      camps: perCamp,
+    };
+  };
+
   const sumDLT = (orders) =>
     orders.reduce((acc, o) =>
       acc +
@@ -270,6 +366,17 @@ export default function UserReports() {
       if (cLatest) setLatestOrders(cLatest);
       const cIns = getCache(KEY_INS);
       if (cIns) setInsights(cIns);
+      if (cIns && cIns.camps) {
+        const perCamp = (cIns.camps || []).map(([name, count]) => {
+          const cap = CAMP_CAPACITY[name] || 0;
+          const pct = cap ? Math.min(100, Math.round((count / cap) * 100)) : 0;
+          return { name, count, capacity: cap, percent: pct, remaining: Math.max(0, cap - count) };
+        });
+        const totalCount = perCamp.reduce((a, c) => a + c.count, 0);
+        const totalPercent = CAMP_TOTAL_CAP ? Math.min(100, Math.round((totalCount / CAMP_TOTAL_CAP) * 100)) : 0;
+        const totalRemaining = Math.max(0, CAMP_TOTAL_CAP - totalCount);
+        setCampStats({ total: { count: totalCount, capacity: CAMP_TOTAL_CAP, percent: totalPercent, remaining: totalRemaining }, camps: perCamp });
+      }
     } catch {}
     const fetchData = async () => {
       try {
@@ -295,12 +402,7 @@ export default function UserReports() {
           fetchAllOrders({ ...commonParams, after: prevStart.toISOString(),     before: prevEnd.toISOString()     }),
         ]);
 
-        const onlyDLTLineItems = (orders) => {
-          return (orders || []).map(o => {
-            const dltItems = (o.line_items || []).filter(li => isDLTLineItem(li, dltProductIds));
-            return { ...o, line_items: dltItems };
-          }).filter(o => (o.line_items || []).length > 0);
-        };
+        const onlyDLTLineItems = (orders) => orders || [];
 
         const ordersThisMonth = onlyDLTLineItems(ordersThisMonthRaw);
         const ordersSeason = onlyDLTLineItems(ordersSeasonRaw);
@@ -370,12 +472,15 @@ export default function UserReports() {
 
         // Insights aggregations
         const clubs = tallyByMeta(ordersSeason, ["dlt_klubblag", "klubblag", "klubb"]);
-        const positions = tallyByMeta(ordersSeason, ["dlt_basket_position", "position", "basket_position"]);
+        const positionsRaw = tallyByMeta(ordersSeason, ["dlt_basket_position", "position", "basket_position"]);
+        const positions = normalizePositions(positionsRaw);
         const birthYears = tallyByMeta(ordersSeason, ["dlt_alderspelare", "fodelsear", "födelseår", "ar_du_ar_fodd"]);
         const series = tallyByMeta(ordersSeason, ["dlt_aktuellserie", "aktuellserie", "serie"]);
         const tshirts = tallyByMeta(ordersSeason, ["dlt_tshirt", "tshirt", "t-shirt", "storlek"]);
         const products = tallyByProduct(ordersSeason);
-        setInsights({ clubs, positions, birthYears, series, tshirts, products });
+        const campAgg = tallyCampsWithCapacity(ordersSeason);
+        setInsights({ clubs, positions, birthYears, series, tshirts, products, camps: campAgg.camps.map(c => [c.name, c.count]) });
+        setCampStats(campAgg);
         // ---- Cache writes ----
         setCache(KEY_AGG, {
           moneyIn: moneyInSeason,
@@ -389,7 +494,7 @@ export default function UserReports() {
         setCache(KEY_MONTH, monthly.sort((a, b) => new Date(a.date) - new Date(b.date)), 5 * 60 * 1000);
         setCache(KEY_WEEK, weekly.sort((a, b) => a.day - b.day), 5 * 60 * 1000);
         setCache(KEY_LATEST, ordersThisMonth.sort((a, b) => new Date(b.date_created) - new Date(a.date_created)), 3 * 60 * 1000);
-        setCache(KEY_INS, { clubs, positions, birthYears, series, tshirts, products }, 10 * 60 * 1000);
+        setCache(KEY_INS, { clubs, positions, birthYears, series, tshirts, products, camps: campAgg.camps.map(c => [c.name, c.count]) }, 10 * 60 * 1000);
       } catch (err) {
         console.error('Failed to load DLT dashboard stats:', err);
       }
@@ -398,7 +503,7 @@ export default function UserReports() {
   }, []);
 
   const SmallTopList = ({ title, items, icon, iconBg = "secondaryGray.300", iconColor = "brand.500", limit = 5 }) => (
-    <Card>
+    <Card h="100%" display="flex" flexDirection="column">
       <CardHeader pb="8px">
         <Flex align="center" gap="10px">
           <IconBox
@@ -410,7 +515,7 @@ export default function UserReports() {
           <Text fontSize="md" fontWeight="700">{title}</Text>
         </Flex>
       </CardHeader>
-      <CardBody pt="0">
+      <CardBody pt="0" flex="1">
         <Table size="sm" variant="simple">
           <Thead>
             <Tr>
@@ -433,6 +538,46 @@ export default function UserReports() {
       </CardBody>
     </Card>
   );
+
+  const CampEnrollmentCard = ({ data }) => {
+    const total = data?.total || { count: 0, capacity: CAMP_TOTAL_CAP, percent: 0, remaining: CAMP_TOTAL_CAP };
+    const camps = data?.camps || [];
+    return (
+      <Card h="100%" display="flex" flexDirection="column">
+        <CardHeader pb="8px">
+          <Flex align="center" justify="space-between">
+            <Flex align="center" gap="10px">
+              <IconBox
+                w="40px"
+                h="40px"
+                bg={boxBg}
+                icon={<Icon as={MdEventAvailable} w="22px" h="22px" color={brandColor} />}
+              />
+              <Text fontSize="md" fontWeight="700">Antal spelare per läger</Text>
+            </Flex>
+            <Text fontSize="sm" color="secondaryGray.700">
+              Totalt {total.count}/{total.capacity} ({total.percent}%)
+            </Text>
+          </Flex>
+        </CardHeader>
+        <CardBody pt="0" flex="1">
+          {camps.map((c) => (
+            <Box key={c.name} mb="10px">
+              <Flex justify="space-between" fontSize="sm" mb="4px">
+                <Text>{c.name}</Text>
+                <Text className="tabular-nums">{c.count}/{c.capacity} ({c.percent}%)</Text>
+              </Flex>
+              <Progress size="xs" value={c.percent} borderRadius="6px" />
+              <Text mt="4px" fontSize="xs" color={c.remaining === 0 ? "green.500" : "secondaryGray.700"}>
+                {c.remaining === 0 ? "Fullt" : `Lediga platser: ${c.remaining}`}
+              </Text>
+            </Box>
+          ))}
+        </CardBody>
+      </Card>
+    );
+  };
+
 
   const LatestDLTRegistrations = ({ orders }) => {
     return (
@@ -501,6 +646,10 @@ export default function UserReports() {
                 fetchAllOrders({ ...commonParams, after: prevStart.toISOString(),     before: prevEnd.toISOString()     }),
               ]);
               const onlyDLTLineItems = (orders) => {
+                if (!Array.isArray(dltProductIds) || dltProductIds.length === 0) {
+                  // keep orders as-is; camp detection will filter by meta/name later
+                  return orders || [];
+                }
                 return (orders || []).map(o => {
                   const dltItems = (o.line_items || []).filter(li => isDLTLineItem(li, dltProductIds));
                   return { ...o, line_items: dltItems };
@@ -537,130 +686,103 @@ export default function UserReports() {
               setWeeklyData(weekly);
               setLatestOrders(ordersThisMonth.sort((a, b) => new Date(b.date_created) - new Date(a.date_created)));
               const clubs = tallyByMeta(ordersSeason, ["dlt_klubblag", "klubblag", "klubb"]);
-              const positions = tallyByMeta(ordersSeason, ["dlt_basket_position", "position", "basket_position"]);
+              const positionsRaw = tallyByMeta(ordersSeason, ["dlt_basket_position", "position", "basket_position"]);
+              const positions = normalizePositions(positionsRaw);
               const birthYears = tallyByMeta(ordersSeason, ["dlt_alderspelare", "fodelsear", "födelseår", "ar_du_ar_fodd"]);
               const series = tallyByMeta(ordersSeason, ["dlt_aktuellserie", "aktuellserie", "serie"]);
               const tshirts = tallyByMeta(ordersSeason, ["dlt_tshirt", "tshirt", "t-shirt", "storlek"]);
               const products = tallyByProduct(ordersSeason);
-              setInsights({ clubs, positions, birthYears, series, tshirts, products });
+              const campAgg = tallyCampsWithCapacity(ordersSeason);
+              setInsights({ clubs, positions, birthYears, series, tshirts, products, camps: campAgg.camps.map(c => [c.name, c.count]) });
+              setCampStats(campAgg);
               // write caches
               setCache(KEY_AGG, { moneyIn: moneyInSeason, budgetLeft, playersTotal: playersSeason, boysCount: boys, girlsCount: girls, ordersCount: ordersThisMonth.length, growth }, 10*60*1000);
               setCache(KEY_MONTH, monthly, 5*60*1000);
               setCache(KEY_WEEK, weekly, 5*60*1000);
               setCache(KEY_LATEST, ordersThisMonth.sort((a, b) => new Date(b.date_created) - new Date(a.date_created)), 3*60*1000);
-              setCache(KEY_INS, { clubs, positions, birthYears, series, tshirts, products }, 10*60*1000);
+              setCache(KEY_INS, { clubs, positions, birthYears, series, tshirts, products, camps: campAgg.camps.map(c => [c.name, c.count]) }, 10*60*1000);
             } catch (e) { console.error(e); }
           })();
         }}>Uppdatera</Button>
       </Flex>
-      <SimpleGrid columns={{ base: 1, md: 2, xl: 5 }} gap='16px' mb='16px'>
-        {/* 1: Toppklubbar */}
-        <SmallTopList
-          title="Toppklubbar"
-          items={insights.clubs}
-          icon={MdSportsBasketball}
-          iconBg="linear-gradient(90deg, #E0E7FF 0%, #EEF2FF 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
-        {/* 2: Positioner */}
-        <SmallTopList
-          title="Positioner"
-          items={insights.positions}
-          icon={MdLayers}
-          iconBg="linear-gradient(90deg, #DCFCE7 0%, #ECFDF5 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
-        {/* 3: Födelseår */}
-        <SmallTopList
-          title="Födelseår"
-          items={insights.birthYears}
-          icon={MdCalendarToday}
-          iconBg="linear-gradient(90deg, #FEF9C3 0%, #FFFBEB 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
-        {/* 4: Antal anmälda spelare */}
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={<Icon w='32px' h='32px' as={MdGroups} color={brandColor} />}
-            />
-          }
-          growth={`${stats.growth}%`}
-          name='Antal anmälda spelare'
-          value={stats.playersTotal}
-        />
-        {/* 5: Totalt anmälda killar */}
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={<Icon w='32px' h='32px' as={MdGroups} color={brandColor} />}
-            />
-          }
-          name='Totalt anmälda killar'
-          value={stats.boysCount}
-        />
-      </SimpleGrid>
+      <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)', xl: 'repeat(4, 1fr)' }} gap='16px' mb='16px' gridAutoRows='1fr'>
+        {/* Toppklubbar: span two rows on xl */}
+        <GridItem colSpan={{ base: 1, md: 2, xl: 1 }} rowSpan={{ base: 1, xl: 2 }}>
+          <SmallTopList
+            title="Toppklubbar"
+            items={insights.clubs}
+            icon={MdSportsBasketball}
+            iconBg="linear-gradient(90deg, #E0E7FF 0%, #EEF2FF 100%)"
+            iconColor={brandColor}
+            limit={12}
+          />
+        </GridItem>
 
-      <SimpleGrid columns={{ base: 1, md: 2, xl: 5 }} gap='16px' mb='16px'>
-        {/* Rad 2: 3 stora rutor + 2 statistik-kort till höger */}
-        <SmallTopList
-          title="Aktuell serie"
-          items={insights.series}
-          icon={MdEmojiEvents}
-          iconBg="linear-gradient(90deg, #FFE4E6 0%, #FFF1F2 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
-        <SmallTopList
-          title="T‑shirt storlekar"
-          items={insights.tshirts}
-          icon={MdCheckroom}
-          iconBg="linear-gradient(90deg, #F0FDFA 0%, #ECFEFF 100%)"
-          iconColor={brandColor}
-          limit={4}
-        />
-        <SmallTopList
-          title="Könsfördelning"
-          items={[["Killar", stats.boysCount],["Tjejer", stats.girlsCount]]}
-          icon={MdGroups}
-          iconBg="linear-gradient(90deg, #E0E7FF 0%, #EEF2FF 100%)"
-          iconColor={brandColor}
-          limit={2}
-        />
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={<Icon w='32px' h='32px' as={MdGroups} color={brandColor} />}
-            />
-          }
-          name='Totalt anmälda tjejer'
-          value={stats.girlsCount}
-        />
-        <MiniStatistics
-          startContent={
-            <IconBox
-              w='56px'
-              h='56px'
-              bg={boxBg}
-              icon={<Icon w='32px' h='32px' as={MdEventAvailable} color={brandColor} />}
-            />
-          }
-          name='Nya anmälningar (denna månad)'
-          value={stats.ordersCount}
-        />
-      </SimpleGrid>
+        {/* Row 1, Col 2: Positioner (5 inkl Center) */}
+        <GridItem colSpan={{ base: 1, md: 1, xl: 1 }}>
+          <SmallTopList
+            title="Positioner"
+            items={insights.positions}
+            icon={MdLayers}
+            iconBg="linear-gradient(90deg, #DCFCE7 0%, #ECFDF5 100%)"
+            iconColor={brandColor}
+            limit={5}
+          />
+        </GridItem>
+
+        {/* Row 1, Col 3: Antal spelare per läger */}
+        <GridItem colSpan={{ base: 1, md: 1, xl: 1 }}>
+          <CampEnrollmentCard data={campStats} />
+        </GridItem>
+
+        {/* Row 1, Col 4: Aktuell serie */}
+        <GridItem colSpan={{ base: 1, md: 2, xl: 1 }}>
+          <SmallTopList
+            title="Aktuell serie"
+            items={insights.series}
+            icon={MdEmojiEvents}
+            iconBg="linear-gradient(90deg, #FFE4E6 0%, #FFF1F2 100%)"
+            iconColor={brandColor}
+            limit={6}
+          />
+        </GridItem>
+
+        {/* Row 2, Col 2: Könsfördelning */}
+        <GridItem colSpan={{ base: 1, md: 1, xl: 1 }}>
+          <SmallTopList
+            title="Könsfördelning"
+            items={[["Killar", stats.boysCount],["Tjejer", stats.girlsCount]]}
+            icon={MdGroups}
+            iconBg="linear-gradient(90deg, #E0E7FF 0%, #EEF2FF 100%)"
+            iconColor={brandColor}
+            limit={2}
+          />
+        </GridItem>
+
+        {/* Row 2, Col 3: Födelseår (placerad under läger-kortet) */}
+        <GridItem colSpan={{ base: 1, md: 1, xl: 1 }}>
+          <SmallTopList
+            title="Födelseår"
+            items={insights.birthYears}
+            icon={MdCalendarToday}
+            iconBg="linear-gradient(90deg, #FEF9C3 0%, #FFFBEB 100%)"
+            iconColor={brandColor}
+            limit={4}
+          />
+        </GridItem>
+
+        {/* Row 2, Col 4: T‑shirt storlekar */}
+        <GridItem colSpan={{ base: 1, md: 2, xl: 1 }}>
+          <SmallTopList
+            title="T‑shirt storlekar"
+            items={insights.tshirts}
+            icon={MdCheckroom}
+            iconBg="linear-gradient(90deg, #F0FDFA 0%, #ECFEFF 100%)"
+            iconColor={brandColor}
+            limit={4}
+          />
+        </GridItem>
+      </Grid>
 
       <SimpleGrid columns={{ base: 1, md: 1 }} gap='20px' mb='20px'>
         <LatestDLTRegistrations orders={latestOrders} />
