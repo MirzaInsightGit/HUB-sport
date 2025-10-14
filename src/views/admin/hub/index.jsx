@@ -402,7 +402,16 @@ export default function UserReports() {
           fetchAllOrders({ ...commonParams, after: prevStart.toISOString(),     before: prevEnd.toISOString()     }),
         ]);
 
-        const onlyDLTLineItems = (orders) => orders || [];
+        const onlyDLTLineItems = (orders) => {
+          if (!Array.isArray(dltProductIds) || dltProductIds.length === 0) {
+            // keep orders as-is; camp detection will filter by meta/name later
+            return orders || [];
+          }
+          return (orders || []).map(o => {
+            const dltItems = (o.line_items || []).filter(li => isDLTLineItem(li, dltProductIds));
+            return { ...o, line_items: dltItems };
+          }).filter(o => (o.line_items || []).length > 0);
+        };
 
         const ordersThisMonth = onlyDLTLineItems(ordersThisMonthRaw);
         const ordersSeason = onlyDLTLineItems(ordersSeasonRaw);
@@ -478,7 +487,8 @@ export default function UserReports() {
         const series = tallyByMeta(ordersSeason, ["dlt_aktuellserie", "aktuellserie", "serie"]);
         const tshirts = tallyByMeta(ordersSeason, ["dlt_tshirt", "tshirt", "t-shirt", "storlek"]);
         const products = tallyByProduct(ordersSeason);
-        const campAgg = tallyCampsWithCapacity(ordersSeason);
+        // Use raw orders for camp aggregation to avoid dropping lines
+        const campAgg = tallyCampsWithCapacity(ordersSeasonRaw);
         setInsights({ clubs, positions, birthYears, series, tshirts, products, camps: campAgg.camps.map(c => [c.name, c.count]) });
         setCampStats(campAgg);
         // ---- Cache writes ----
@@ -692,7 +702,8 @@ export default function UserReports() {
               const series = tallyByMeta(ordersSeason, ["dlt_aktuellserie", "aktuellserie", "serie"]);
               const tshirts = tallyByMeta(ordersSeason, ["dlt_tshirt", "tshirt", "t-shirt", "storlek"]);
               const products = tallyByProduct(ordersSeason);
-              const campAgg = tallyCampsWithCapacity(ordersSeason);
+              // Use raw orders for camp aggregation to avoid dropping lines
+              const campAgg = tallyCampsWithCapacity(ordersSeasonRaw);
               setInsights({ clubs, positions, birthYears, series, tshirts, products, camps: campAgg.camps.map(c => [c.name, c.count]) });
               setCampStats(campAgg);
               // write caches

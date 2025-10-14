@@ -4,6 +4,7 @@ import 'ag-grid-community/styles/ag-theme-quartz.css';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 import axios from 'axios';
 import { Card, Heading, Flex, Button, Text, useColorModeValue, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Box, useDisclosure, Spinner, Checkbox, Popover, PopoverTrigger, PopoverContent, PopoverArrow, PopoverBody, PopoverCloseButton, useToast, Switch } from "@chakra-ui/react";
+import { DownloadIcon } from '@chakra-ui/icons';
 import { useMsal } from "@azure/msal-react";
 import { API_BASE } from '../../config/apiBase';
 
@@ -1250,6 +1251,67 @@ const PlayerList = () => {
     </Box>
   );
 
+  // ---- Export helpers ------------------------------------------------------------
+  const downloadTextFile = (filename, text, type = 'text/csv;charset=utf-8') => {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const escapeCsv = (v) => {
+    const s = (v ?? '').toString();
+    if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  };
+
+  // Export only player + parent emails (current view)
+  const handleExportEmails = () => {
+    const rows = (showOnlyFavorites ? rowData.filter(r => r.isFavorite) : rowData);
+    const header = ['Spelarnamn','Spelarens e-post','Föräldrar namn','Föräldrar e-post','Klubblag','Aktuell serie','Mobilnummer'];
+    const lines = [header.join(',')];
+    rows.forEach(r => {
+      lines.push([
+        escapeCsv(r.spelarnamn || ''),
+        escapeCsv(r.spelarmejl || ''),
+        escapeCsv(r.name || ''),
+        escapeCsv(r.email || ''),
+        escapeCsv(r.klubblag || ''),
+        escapeCsv(r.aktuellserie || ''),
+        escapeCsv(r.mobilnummer || r.phone || '')
+      ].join(','));
+    });
+    downloadTextFile('player_parent_emails.csv', lines.join('\n'));
+  };
+
+  // Export the grid as CSV via ag-Grid (matches current visible columns & rows)
+  const handleExportGridCsv = () => {
+    try {
+      const api = gridRef.current?.api;
+      if (!api) return;
+      api.exportDataAsCsv({
+        fileName: 'playerlist_view.csv',
+        allColumns: false,       // only currently visible columns
+        onlySelectedAllPages: false,
+        suppressQuotes: false,
+      });
+    } catch (e) {
+      console.warn('CSV export failed', e);
+      toast({
+        title: 'Export misslyckades',
+        description: 'Kunde inte exportera CSV. Prova igen.',
+        status: 'error', duration: 2500, isClosable: true, position: 'bottom-right'
+      });
+    }
+  };
+
   return (
     <Card p='20px' borderRadius='20px' boxShadow='lg' mt='20px' bg='white' w='100%'>
       <Flex justify='space-between' align='center' mb='4'>
@@ -1324,6 +1386,12 @@ const PlayerList = () => {
               </PopoverBody>
             </PopoverContent>
           </Popover>
+          <Button ml='2' size='sm' leftIcon={<DownloadIcon />} onClick={handleExportEmails}>
+            Exportera e‑post (spelare + förälder)
+          </Button>
+          <Button ml='2' size='sm' variant='outline' leftIcon={<DownloadIcon />} onClick={handleExportGridCsv}>
+            Exportera CSV (nuvarande vy)
+          </Button>
           <Button ml='2' size='sm' variant='outline' onClick={() => {
             sessionStorage.removeItem(CACHE_KEY);
             // keep overrides but refresh data

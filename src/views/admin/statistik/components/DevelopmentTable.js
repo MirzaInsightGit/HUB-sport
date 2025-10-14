@@ -10,6 +10,7 @@ import {
   Thead,
   Tr,
   useColorModeValue,
+  Badge,
 } from '@chakra-ui/react';
 import {
   createColumnHelper,
@@ -23,11 +24,38 @@ import Menu from 'components/menu/MainMenu';
 
 const columnHelper = createColumnHelper();
 
+function Sparkline({ data, color }) {
+  if (!data || data.length === 0) return null;
+  const width = 80;
+  const height = 20;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const points = data
+    .map((d, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((d - min) / range) * height;
+      return `${x},${y}`;
+    })
+    .join(' ');
+  return (
+    <svg width={width} height={height} aria-label="sparkline" role="img" style={{ display: 'block' }}>
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        points={points}
+      />
+    </svg>
+  );
+}
+
 export default function DevelopmentTable(props) {
   const { columnsData, tableData, title } = props;
   const [sorting, setSorting] = React.useState([]);
   const textColor = useColorModeValue('secondaryGray.900', 'white');
   const borderColor = useColorModeValue('gray.200', 'whiteAlpha.100');
+  const sparkColor = useColorModeValue('#3182CE', '#63B3ED');
 
   const columns = columnsData.map(col => 
     columnHelper.accessor(col.accessor, {
@@ -42,13 +70,44 @@ export default function DevelopmentTable(props) {
           {col.Header}
         </Text>
       ),
-      cell: (info) => (
-        <Flex align="center">
-          <Text color={textColor} fontSize="sm" fontWeight="700">
-            {info.getValue()}
-          </Text>
-        </Flex>
-      ),
+      cell: (info) => {
+        const value = info.getValue();
+        if (col.type === 'badge') {
+          let bgColor = 'gray.300';
+          if (value === 'A' || value === 'B') bgColor = 'green.400';
+          else if (value === 'C') bgColor = 'yellow.400';
+          else if (value === 'D' || value === 'F') bgColor = 'red.400';
+          return (
+            <Badge
+              bg={bgColor}
+              color="white"
+              fontSize="sm"
+              fontWeight="700"
+              px="2"
+              py="1"
+              borderRadius="md"
+              textAlign="center"
+              minW="24px"
+            >
+              {value}
+            </Badge>
+          );
+        }
+        if (col.type === 'spark') {
+          return (
+            <Flex align="center">
+              <Sparkline data={value} color={sparkColor} />
+            </Flex>
+          );
+        }
+        return (
+          <Flex align="center">
+            <Text color={textColor} fontSize="sm" fontWeight="700">
+              {value}
+            </Text>
+          </Flex>
+        );
+      },
     })
   );
 
