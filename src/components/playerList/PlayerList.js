@@ -538,6 +538,7 @@ const PlayerList = () => {
           }
         } catch (_) { /* dev utan token */ }
         headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+        headers['x-tenant-id'] = TENANT_ID;
 
         const res = await fetch(`${API_BASE}/favorites`, { headers });
         const favIds = await res.json();
@@ -766,6 +767,7 @@ const PlayerList = () => {
       }
     } catch (_) { /* dev without token */ }
     headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+    headers['x-tenant-id'] = TENANT_ID;
 
     // --- Optimistic UI update: flip local state immediately ---
     setRowData(prev => prev.map(r => r.id === player.id ? { ...r, isFavorite: !currentlyFav } : r));
