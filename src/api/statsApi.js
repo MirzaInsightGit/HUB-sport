@@ -4,7 +4,7 @@ import { API_BASE } from "../config/apiBase";
 
 import { pca, loginRequest } from '../authConfig';
 
-const STATS = `${API_BASE}/stats`;
+const STATS = `${API_BASE}/district/stats`;
 const http = axios.create({ timeout: 15000 });
 
 async function ensureAccessToken() {
@@ -36,3 +36,25 @@ export const getTopScorersFromTournament = async (tournamentId, limit = 20, maxM
   );
   return res.data;
 };
+
+/**
+ * Aggregated player stats for "Statistik – Distrikt"
+ * Backend route: GET /api/stats/players
+ * Accepts optional params:
+ *  - gender: 'F' | 'M'
+ *  - fullyRated: boolean
+ *  - favoritesOnly: boolean
+ *  - panel: 'total' | 'form' | 'compare' | 'quality'
+ *  - season, district, age, etc. (forwarded as-is)
+ */
+export const getDistrictStats = async (params = {}, token) => {
+  const res = await http.get(`${STATS}/district/stats`, withParams(params, token));
+  return res.data;
+};
+
+// Convenience helpers that only set gender while forwarding other params
+export const getDistrictStatsGirls = async (params = {}, token) =>
+  getDistrictStats({ ...params, gender: 'F' }, token);
+
+export const getDistrictStatsBoys = async (params = {}, token) =>
+  getDistrictStats({ ...params, gender: 'M' }, token);
