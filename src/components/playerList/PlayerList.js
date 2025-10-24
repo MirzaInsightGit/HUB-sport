@@ -540,7 +540,7 @@ const PlayerList = () => {
         headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
         headers['x-tenant-id'] = TENANT_ID;
 
-        const res = await fetch(`${API_BASE}/favorites`, { headers });
+        const res = await fetch(`${API_BASE}/district/favorites`, { headers });
         const favIds = await res.json();
         favSet = new Set(Array.isArray(favIds) ? favIds : []);
         setFavorites(favSet);
@@ -652,9 +652,10 @@ const PlayerList = () => {
       const playersWithFav = (players || []).map((p) => {
         const n = normalize(p);
         const fav =
-          favSet.has(n.id) ||
-          (n.legacyId && favSet.has(n.legacyId)) ||
-          (n.parentEmail && favSet.has(n.parentEmail));
+            favSet.has(n.id) ||
+            (n.spelarmejl && favSet.has(String(n.spelarmejl).toLowerCase())) ||
+            (n.legacyId && favSet.has(n.legacyId)) ||
+            (n.parentEmail && favSet.has(n.parentEmail));
         return { ...n, isFavorite: fav };
       });
       console.log('[PlayerList] total players loaded:', playersWithFav.length);
@@ -714,8 +715,63 @@ const PlayerList = () => {
         deduped.push(best);
       }
       console.log('[PlayerList] deduped count:', { before: playersWithFav.length, after: deduped.length });
-      setCache(CACHE_KEY, { rows: deduped }, 10 * 60 * 1000); // 10 min TTL
-      setRowData(deduped);
+
+      // ---- Hydrate favorites with latest ratings/comments from Cosmos ----------
+      let merged = deduped;
+      try {
+        // Build auth headers once
+        const scopes = buildScopes();
+        let headers = {};
+        try {
+          if (scopes.length > 0) {
+            const tokenResp = await instance.acquireTokenSilent({ scopes, account: accounts[0] });
+            if (tokenResp?.accessToken) headers.Authorization = `Bearer ${tokenResp.accessToken}`;
+          }
+        } catch (_) { /* dev utan token */ }
+        headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
+        headers['x-tenant-id'] = TENANT_ID;
+
+        const favIdsToHydrate = deduped
+          .filter(p => !!p.isFavorite)
+          .map(p => preferredPlayerId(p))
+          .filter(Boolean);
+
+        if (favIdsToHydrate.length) {
+          const map = new Map();
+          await Promise.all(
+            favIdsToHydrate.map(async (pid) => {
+              try {
+                const r = await fetch(`${API_BASE}/district/players/${encodeURIComponent(pid)}/ratings`, { headers });
+                if (r.ok) {
+                  const j = await r.json();
+                  map.set(pid, j);
+                }
+              } catch (_) { /* ignore network errors */ }
+            })
+          );
+
+          if (map.size) {
+            merged = deduped.map(p => {
+              const pid = preferredPlayerId(p);
+              const doc = pid && map.get(pid);
+              if (doc && (doc.ratings || doc.comments)) {
+                return {
+                  ...p,
+                  ratings: Array.isArray(doc.ratings) ? doc.ratings : p.ratings,
+                  comments: Array.isArray(doc.comments) ? doc.comments : p.comments,
+                  id: doc.id || p.id
+                };
+              }
+              return p;
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('[PlayerList] hydration skipped:', e?.message || e);
+      }
+
+      setCache(CACHE_KEY, { rows: merged }, 10 * 60 * 1000); // 10 min TTL
+      setRowData(merged);
       setIsLoading(false);
     } catch (error) {
       console.error('Error fetching players:', error.response ? error.response.data : error.message);
@@ -738,25 +794,36 @@ const PlayerList = () => {
 
   // ---- Favorit-cache sync helper ------------------------------------------------
   const updateCacheAfterFavorite = useCallback((playerId, isFav) => {
-    try {
-      const cached = getCache(CACHE_KEY);
-      if (cached && Array.isArray(cached.rows)) {
-        const rows = cached.rows.map(r => (r.id === playerId ? { ...r, isFavorite: isFav } : r));
-        // reuse same TTL window (10 minutes)
-        setCache(CACHE_KEY, { rows }, 10 * 60 * 1000);
-      }
-    } catch (_) {}
-  }, [CACHE_KEY]);
+  try {
+    const cached = getCache(CACHE_KEY);
+    if (cached && Array.isArray(cached.rows)) {
+      const rows = cached.rows.map(r => {
+        const rid = preferredPlayerId(r) || r.id;
+        return (r.id === playerId || rid === playerId)
+          ? { ...r, isFavorite: isFav }
+          : r;
+      });
+      setCache(CACHE_KEY, { rows }, 10 * 60 * 1000);
+    }
+  } catch (_) {}
+}, [CACHE_KEY]);
 
   // ---- Favorit-toggle -----------------------------------------------------------
   const toggleFavorite = useCallback(async (player) => {
     const scopes = buildScopes();
+
+    // Use a stable player-centric id for persistence, prefer child email
+    const effectiveId = preferredPlayerId(player) || player.id;
+    const candidates = idCandidates(player);
 
     // prevent spamming the same row while request is in flight
     setPendingFavIds(prev => new Set(prev).add(player.id));
 
     // compute current value from the row (source of truth) to avoid stale Set
     const currentlyFav = !!player.isFavorite;
+
+    // Diagnostics for debugging
+    console.debug('[favorites] toggle ->', { effectiveId, rowId: player.id, currentlyFav });
 
     // build headers (MSAL token if available)
     let headers = { 'Content-Type': 'application/json' };
@@ -786,29 +853,34 @@ const PlayerList = () => {
     } catch (_) {}
 
     // also update the Set used by filters/buttons
-    setFavorites(prev => {
-      const next = new Set(prev);
-      if (currentlyFav) next.delete(player.id); else next.add(player.id);
-      return next;
-    });
+            setFavorites(prev => {
+        const next = new Set(prev);
+        const keys = new Set([player.id, effectiveId, (player.spelarmejl || '').toLowerCase()]);
+        if (currentlyFav) {
+          keys.forEach(k => k && next.delete(k));
+        } else {
+          keys.forEach(k => k && next.add(k));
+        }
+        return next;
+      });
 
     // --- Persist to backend ---
     let finalOk = false;
     try {
-      const payload = { playerId: player.id, favorite: !currentlyFav };
-      let res = await fetch(`${API_BASE}/favorites/toggle`, { method: 'POST', headers, body: JSON.stringify(payload) });
+      const payload = { playerId: effectiveId, favorite: !currentlyFav, idCandidates: candidates };
+      let res = await fetch(`${API_BASE}/district/favorites/toggle`, { method: 'POST', headers, body: JSON.stringify(payload) });
 
       if (!res.ok) {
         if (currentlyFav) {
           // explicit remove fallbacks
-          res = await fetch(`${API_BASE}/favorites/remove`, { method: 'POST', headers, body: JSON.stringify({ playerId: player.id }) });
+          res = await fetch(`${API_BASE}/district/favorites/remove`, { method: 'POST', headers, body: JSON.stringify({ playerId: effectiveId }) });
           if (!res.ok) {
-            const url = `${API_BASE}/favorites?playerId=${encodeURIComponent(player.id)}`;
+            const url = `${API_BASE}/district/favorites?playerId=${encodeURIComponent(effectiveId)}`;
             res = await fetch(url, { method: 'DELETE', headers });
           }
         } else {
           // legacy add endpoint
-          res = await fetch(`${API_BASE}/favorites`, { method: 'POST', headers, body: JSON.stringify({ playerId: player.id }) });
+          res = await fetch(`${API_BASE}/district/favorites`, { method: 'POST', headers, body: JSON.stringify({ playerId: effectiveId }) });
         }
       }
 
@@ -829,7 +901,12 @@ const PlayerList = () => {
           }
           setFavorites(prev => {
             const s = new Set(prev);
-            if (newVal) s.add(player.id); else s.delete(player.id);
+            const keys = new Set([player.id, effectiveId, (player.spelarmejl || '').toLowerCase()]);
+            if (newVal) {
+              keys.forEach(k => k && s.add(k));
+            } else {
+              keys.forEach(k => k && s.delete(k));
+            }
             return s;
           });
         } catch (_) { /* server returned no JSON */ }
@@ -846,7 +923,12 @@ const PlayerList = () => {
       updateCacheAfterFavorite(player.id, currentlyFav);
       setFavorites(prev => {
         const s = new Set(prev);
-        if (currentlyFav) s.add(player.id); else s.delete(player.id);
+        const keys = new Set([player.id, effectiveId, (player.spelarmejl || '').toLowerCase()]);
+        if (currentlyFav) {
+          keys.forEach(k => k && s.add(k));
+        } else {
+          keys.forEach(k => k && s.delete(k));
+        }
         return s;
       });
       try {
@@ -912,6 +994,8 @@ const PlayerList = () => {
       comments: comments5,
       idCandidates: candidates
     };
+    // Logging request intent for diagnostics
+    console.debug('[ratings] save ->', { effectiveId, candidates, hasRatings: !!ratings5, hasComments: !!comments5 });
 
     // headers (MSAL token if available)
     const scopes = buildScopes();
