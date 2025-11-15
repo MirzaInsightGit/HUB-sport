@@ -1404,7 +1404,7 @@ const PlayerList = () => {
         <Heading size='lg' color={textColor}>Registrerade Spelare till Tryout & Läger</Heading>
         <Flex>
           <Text mr='4' fontSize='sm' color='gray.600'>Antal spelare: {displayRows.length}</Text>
-          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg system för spelare</Button>
+          <Button style={{ backgroundColor: 'lightgreen' }} size='sm' ml='2' onClick={onOpen}>Betyg system</Button>
           <Button style={{ backgroundColor: 'lightblue' }} size='sm' ml='2' onClick={() => setShowOnlyFavorites(v => !v)}>
             {showOnlyFavorites ? 'Visa alla anmälda spelare' : 'Visa mina sparade favorit spelare'}
           </Button>
