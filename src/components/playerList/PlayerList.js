@@ -115,6 +115,16 @@ const getMetaDeep = (order, keys = []) => {
 
 // Normalize phone to only digits
 const normalizePhone = (s) => String(s || '').replace(/\D+/g, '');
+
+// Jersey number must be an integer 1..999
+const sanitizeJersey = (v) => {
+  const n = Number(String(v || '').replace(/\D+/g, ''));
+  if (!Number.isFinite(n)) return '';
+  if (n < 1) return 1;
+  if (n > 999) return 999;
+  return n;
+};
+
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const camps = ['Läger 1', 'Läger 2', 'Läger 3', 'Läger 4', 'Läger 5'];
@@ -125,6 +135,7 @@ const categoryTitles = ['Bollkontroll', 'Försvar', 'Anfall', 'Kommunikation', '
 const TOGGLABLE_COLUMNS = [
   { id: 'fav', label: 'Favorit' },
   { id: 'spelarnamn', label: 'Spelarnamn' },
+  { id: 'jersey_number', label: 'Tröjnummer' },
   { id: 'kon', label: 'Kön' },
   { id: 'alderspelare', label: 'Ålderspelare' },
   { id: 'klubblag', label: 'Klubblag' },
@@ -179,10 +190,10 @@ const PlayerList = () => {
       const saved = JSON.parse(localStorage.getItem(COL_KEY) || 'null');
       if (saved && typeof saved === 'object') return saved;
     } catch (_) {}
-    // default: visa endast Favorit → Aktuell Serie
+    // default: visa endast Favorit → Aktuell Serie (+ Tröjnummer)
     const allOn = {};
     TOGGLABLE_COLUMNS.forEach(c => { allOn[c.id] = false; });
-    ['fav','spelarnamn','kon','alderspelare','klubblag','basket_position','aktuellserie']
+    ['fav','spelarnamn','jersey_number','kon','alderspelare','klubblag','basket_position','aktuellserie']
       .forEach(id => { allOn[id] = true; });
     return allOn;
   });
@@ -635,10 +646,24 @@ const PlayerList = () => {
         const legacyId = p.id || '';
         const finalId = computedId || (legacyId ? String(legacyId).toLowerCase() : '');
 
+        // Jersey number normalization
+        const jerseyNumber = (() => {
+          const direct = p.jerseyNumber;
+          if (direct !== undefined && direct !== null && String(direct).trim() !== '') {
+            return sanitizeJersey(direct);
+          }
+          const metaNum = getMetaLocal(p.meta, [
+            'jersey','jersey_number','jerseynumber','tröjnummer','trojnummer','trönummer','shirt_number','trikotnummer'
+          ]);
+          if (metaNum) return sanitizeJersey(metaNum);
+          return '';
+        })();
+
         return {
           id: finalId,             // alltid spelarens mejl om vi har den
           legacyId,                // gamla id:t (t.ex. o_19146 eller förälders mejl)
           parentEmail: parentEmailLower,
+          jerseyNumber,
           ...p,
           registeredCamps: regs,
           ratings,
@@ -731,15 +756,14 @@ const PlayerList = () => {
         headers['x-dev-coachid'] = accounts?.[0]?.username || accounts?.[0]?.localAccountId || 'local-dev';
         headers['x-tenant-id'] = TENANT_ID;
 
-        const favIdsToHydrate = deduped
-          .filter(p => !!p.isFavorite)
+        const idsToHydrate = deduped
           .map(p => preferredPlayerId(p))
           .filter(Boolean);
 
-        if (favIdsToHydrate.length) {
+        if (idsToHydrate.length) {
           const map = new Map();
           await Promise.all(
-            favIdsToHydrate.map(async (pid) => {
+            idsToHydrate.map(async (pid) => {
               try {
                 const r = await fetch(`${API_BASE}/district/players/${encodeURIComponent(pid)}/ratings`, { headers });
                 if (r.ok) {
@@ -759,6 +783,7 @@ const PlayerList = () => {
                   ...p,
                   ratings: Array.isArray(doc.ratings) ? doc.ratings : p.ratings,
                   comments: Array.isArray(doc.comments) ? doc.comments : p.comments,
+                  jerseyNumber: (doc.jerseyNumber !== undefined ? doc.jerseyNumber : p.jerseyNumber),
                   id: doc.id || p.id
                 };
               }
@@ -980,6 +1005,11 @@ const PlayerList = () => {
     const ratings5  = ensureLen5(data?.ratings,  () => ({})).map(cleanRating);
     const comments5 = ensureLen5(data?.comments, () => ({ value:'', by:'', timestamp:'' })).map(cleanComment);
 
+    // Single-value field persisted for all coaches
+    const jerseyNumber = (data && data.jerseyNumber !== undefined)
+      ? sanitizeJersey(data.jerseyNumber)
+      : '';
+
     // Build a robust, player-centric id and fallbacks (legacy ids)
     const effectiveId = preferredPlayerId(data);
     const candidates  = idCandidates(data);
@@ -992,6 +1022,7 @@ const PlayerList = () => {
       tenantId: TENANT_ID,
       ratings: ratings5,
       comments: comments5,
+      jerseyNumber: jerseyNumber === '' ? undefined : jerseyNumber,
       idCandidates: candidates
     };
     // Logging request intent for diagnostics
@@ -1072,6 +1103,7 @@ const PlayerList = () => {
             ...r,
             ratings: Array.isArray(saved.ratings) ? saved.ratings : r.ratings,
             comments: Array.isArray(saved.comments) ? saved.comments : r.comments,
+            jerseyNumber: (saved.jerseyNumber !== undefined ? saved.jerseyNumber : r.jerseyNumber),
             id: saved.id || r.id
           } : r;
         }));
@@ -1085,6 +1117,7 @@ const PlayerList = () => {
               ...r,
               ratings: Array.isArray(saved.ratings) ? saved.ratings : r.ratings,
               comments: Array.isArray(saved.comments) ? saved.comments : r.comments,
+              jerseyNumber: (saved.jerseyNumber !== undefined ? saved.jerseyNumber : r.jerseyNumber),
               id: saved.id || r.id
             } : r;
           });
@@ -1133,6 +1166,13 @@ const PlayerList = () => {
         params.data.comments[campIndex].timestamp = new Date().toISOString();
         needSave = true;
       }
+    } else if (params.colDef.colId === 'jersey_number') {
+      const next = sanitizeJersey(params.newValue);
+      const prev = sanitizeJersey(params.oldValue);
+      if (next !== prev) {
+        params.data.jerseyNumber = next;
+        needSave = true;
+      }
     }
 
     if (needSave) {
@@ -1140,7 +1180,8 @@ const PlayerList = () => {
       const item = {
         ...row,
         ratings: row.ratings,
-        comments: row.comments
+        comments: row.comments,
+        jerseyNumber: row.jerseyNumber
       };
       await savePlayerData(preferredPlayerId(row), item);
     }
@@ -1233,6 +1274,28 @@ const PlayerList = () => {
       volatile: true,
     },
     { headerName: 'Spelarnamn', colId: 'spelarnamn', field: 'spelarnamn', sortable: true, filter: true, pinned: 'left', hide: !colVisibility['spelarnamn'] },
+    {
+      headerName: 'Tröjnummer',
+      colId: 'jersey_number',
+      field: 'jerseyNumber',
+      pinned: 'left',
+      width: 130,
+      sortable: true,
+      filter: true,
+      editable: true,
+      singleClickEdit: true,
+      hide: !colVisibility['jersey_number'],
+      valueGetter: (params) =>
+        (params.data && params.data.jerseyNumber !== undefined ? params.data.jerseyNumber : ''),
+      valueSetter: (params) => {
+        const v = sanitizeJersey(params.newValue);
+        params.data.jerseyNumber = v === '' ? '' : v;
+        return true;
+      },
+      cellEditor: 'agTextCellEditor',
+      valueParser: (params) => sanitizeJersey(params.newValue),
+      onCellValueChanged,
+    },
     { headerName: 'Kön', colId: 'kon', field: 'kon', sortable: true, filter: true, hide: !colVisibility['kon'] },
     { headerName: 'Ålderspelare', colId: 'alderspelare', field: 'alderspelare', sortable: true, filter: true, hide: !colVisibility['alderspelare'] },
     { headerName: 'Klubblag', colId: 'klubblag', field: 'klubblag', sortable: true, filter: true, hide: !colVisibility['klubblag'] },
@@ -1361,11 +1424,12 @@ const PlayerList = () => {
   // Export only player + parent emails (current view)
   const handleExportEmails = () => {
     const rows = (showOnlyFavorites ? rowData.filter(r => r.isFavorite) : rowData);
-    const header = ['Spelarnamn','Spelarens e-post','Föräldrar namn','Föräldrar e-post','Klubblag','Aktuell serie','Mobilnummer'];
+    const header = ['Spelarnamn','Tröjnummer','Spelarens e-post','Föräldrar namn','Föräldrar e-post','Klubblag','Aktuell serie','Mobilnummer'];
     const lines = [header.join(',')];
     rows.forEach(r => {
       lines.push([
         escapeCsv(r.spelarnamn || ''),
+        escapeCsv(r.jerseyNumber !== undefined ? r.jerseyNumber : ''),
         escapeCsv(r.spelarmejl || ''),
         escapeCsv(r.name || ''),
         escapeCsv(r.email || ''),
