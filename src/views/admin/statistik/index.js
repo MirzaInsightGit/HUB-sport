@@ -25,6 +25,12 @@ const prettyNameFromEmail = (email = "") => {
 
 const pick = (...vals) => vals.find((v) => v != null && v !== "") ?? null;
 
+const round3 = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 1000) / 1000;
+};
+
 const displayName = (p = {}) =>
   pick(p.displayName, p.name, p.playerName, p.fullName, p.fullname) ||
   prettyNameFromEmail(p.id || p.playerId || p.email || "");
@@ -67,6 +73,7 @@ const setCache = (key, data, ttlMs) => {
 const columnsByPanel = {
   1: [
     { Header: "NAMN", accessor: "name" },
+    { Header: "TRÖJNUMMER", accessor: "jerseyNumber" },
     { Header: "RANK", accessor: "rank" },
     { Header: "SNITT POÄNG", accessor: "average" },
     { Header: "LÄGER 1", accessor: "camp1" },
@@ -77,6 +84,7 @@ const columnsByPanel = {
   ],
   2: [
     { Header: "NAMN", accessor: "name" },
+    { Header: "TRÖJNUMMER", accessor: "jerseyNumber" },
     { Header: "FORM", accessor: "form" },
     { Header: "SNITT POÄNG", accessor: "average" },
     { Header: "LÄGER 1", accessor: "camp1" },
@@ -84,11 +92,13 @@ const columnsByPanel = {
   ],
   3: [
     { Header: "NAMN", accessor: "name" },
+    { Header: "TRÖJNUMMER", accessor: "jerseyNumber" },
     { Header: "JÄMFÖRELSE", accessor: "comparison" },
     { Header: "SNITT POÄNG", accessor: "average" },
   ],
   4: [
     { Header: "NAMN", accessor: "name" },
+    { Header: "TRÖJNUMMER", accessor: "jerseyNumber" },
     { Header: "KVALITET", accessor: "quality" },
     { Header: "SNITT POÄNG", accessor: "average" },
   ],
@@ -120,59 +130,136 @@ export default function StatistikDistrikt() {
     // helper to normalize various server payloads into the
     // { femaleData:[], maleData:[] } shape we render
     const normalize = (payload) => {
-      // already in final shape
-      if (payload?.femaleData || payload?.maleData) {
-        return {
-          femaleData: payload.femaleData || [],
-          maleData: payload.maleData || [],
+      const players = Array.isArray(payload?._players) ? payload._players : [];
+
+      // Bygg ett index av stats från payload baserat på e-post/id
+      const statsList = [];
+      if (Array.isArray(payload?.players)) statsList.push(...payload.players);
+      if (Array.isArray(payload?.femaleData)) statsList.push(...payload.femaleData);
+      if (Array.isArray(payload?.maleData)) statsList.push(...payload.maleData);
+      if (Array.isArray(payload?.data)) statsList.push(...payload.data);
+
+      const statsIndex = new Map();
+      statsList.forEach((s) => {
+        const keys = [
+          s.spelarmejl,
+          s.playerEmail,
+          s.email,
+          s.id,
+          s.playerId,
+        ].filter(Boolean);
+
+        keys.forEach((k) => {
+          const key = String(k).toLowerCase();
+          if (!key) return;
+          if (!statsIndex.has(key)) {
+            statsIndex.set(key, s);
+          }
+        });
+      });
+
+      const females = [];
+      const males = [];
+
+      players.forEach((p) => {
+        const candidateKeys = [
+          p.spelarmejl,
+          p.playerEmail,
+          p.email,
+          p.id,
+          p.playerId,
+        ]
+          .filter(Boolean)
+          .map((k) => String(k).toLowerCase());
+
+        let stat = null;
+        for (let i = 0; i < candidateKeys.length; i++) {
+          const key = candidateKeys[i];
+          if (statsIndex.has(key)) {
+            stat = statsIndex.get(key);
+            break;
+          }
+        }
+
+        const genderRaw = String(p.gender || p.kon || "").toLowerCase().trim();
+
+        const isFemale =
+          genderRaw.includes("kvinna") ||
+          genderRaw.includes("flick") ||
+          genderRaw === "f" ||
+          genderRaw === "female";
+
+        const isMale =
+          genderRaw.includes("kille") ||
+          genderRaw.includes("pojke") ||
+          genderRaw.includes("man") ||
+          genderRaw === "m" ||
+          genderRaw === "male";
+
+        const row = {
+          name:
+            p.spelarnamn ||
+            p.playerName ||
+            p.fullName ||
+            p.fullname ||
+            displayName(p),
+          jerseyNumber:
+            // 1) Cosmos / players (samma som i Anmälan + Distrikt-listan)
+            p.jerseyNumber ??
+            p.tronummer ??
+            p.trojnummer ??
+            p.trojNummer ??
+            // 2) fallback: om backend skickar tröjnummer via stats-payloaden
+            stat?.jerseyNumber ??
+            stat?.tronummer ??
+            stat?.trojnummer ??
+            stat?.trojNummer ??
+            null,
+          // rank sätts efter sortering baserat på snittpoäng
+          rank: null,
+          ratedBy: stat ? latestCoach(stat) : "-",
+          average: round3(stat?.average ?? stat?.avg ?? stat?.snitt ?? 0),
+          camp1: round3(stat?.camp1 ?? stat?.lager1 ?? 0),
+          camp2: round3(stat?.camp2 ?? stat?.lager2 ?? 0),
+          camp3: round3(stat?.camp3 ?? stat?.lager3 ?? 0),
+          camp4: round3(stat?.camp4 ?? stat?.lager4 ?? 0),
+          camp5: round3(stat?.camp5 ?? stat?.lager5 ?? 0),
+          form: stat && stat.form != null ? round3(stat.form) : undefined,
+          comparison:
+            stat && stat.comparison != null
+              ? round3(stat.comparison)
+              : undefined,
+          quality:
+            stat && stat.quality != null ? round3(stat.quality) : undefined,
         };
-      }
 
-      // legacy aggregated list without gender split
-      if (Array.isArray(payload?.players)) {
-        const byGender = (list = []) => {
-          const f = [], m = [];
-          list.forEach((p, idx) => {
-            const row = {
-              name: displayName(p),
-              rank: p.rank ?? p.position ?? "-",
-              ratedBy: latestCoach(p),
-              average: p.average ?? p.avg ?? p.snitt ?? 0,
-              camp1: p.camp1 ?? p.lager1 ?? 0,
-              camp2: p.camp2 ?? p.lager2 ?? 0,
-              camp3: p.camp3 ?? p.lager3 ?? 0,
-              camp4: p.camp4 ?? p.lager4 ?? 0,
-              camp5: p.camp5 ?? p.lager5 ?? 0,
-              form: p.form,
-              comparison: p.comparison,
-              quality: p.quality,
-            };
+        if (isFemale) {
+          females.push(row);
+        } else if (isMale) {
+          males.push(row);
+        } else {
+          // okänt kön — lägg till i tjejlistan så att ingen tappas bort
+          females.push(row);
+        }
+      });
 
-            const g = String(p.gender || p.kon || "").toLowerCase();
-            const isFemale =
-              g.startsWith("k") ||
-              g.includes("kvinna") ||
-              g.includes("flicka") ||
-              g === "f" ||
-              g === "female";
-            const isMale =
-              g.startsWith("m") ||
-              g.includes("man") ||
-              g.includes("pojke") ||
-              g === "m" ||
-              g === "male";
+      const sortByAverageDesc = (a, b) => {
+        const av = Number.isFinite(a.average) ? a.average : 0;
+        const bv = Number.isFinite(b.average) ? b.average : 0;
+        return bv - av;
+      };
 
-            if (isFemale) f.push(row);
-            else if (isMale) m.push(row);
-            else (idx % 2 === 0 ? f : m).push(row); // deterministic fallback to avoid empty column
-          });
-          return { femaleData: f, maleData: m };
-        };
-        return byGender(payload.players);
-      }
+      females.sort(sortByAverageDesc);
+      males.sort(sortByAverageDesc);
 
-      // unknown shape -> fail fast
-      throw new Error("Unsupported stats payload");
+      females.forEach((r, idx) => {
+        r.rank = idx + 1;
+      });
+      males.forEach((r, idx) => {
+        r.rank = idx + 1;
+      });
+
+      return { femaleData: females, maleData: males };
     };
 
     // Try canonical endpoint first, then fall back to the older one
@@ -199,8 +286,34 @@ export default function StatistikDistrikt() {
           if (i === endpoints.length - 1) throw e; // rethrow on last
         }
       }
+      // Fetch full players list so normalize can enrich stats with kön/namn/tröjnummer
+      try {
+        const playersRes = await axios.get(`${API_BASE}/district/players`, {
+          headers: { "x-dev-coachid": coachHeader, "x-tenant-id": tenantHeader },
+        });
+
+        const playersJson = playersRes.data;
+        const playersArr = Array.isArray(playersJson?.players)
+          ? playersJson.players
+          : Array.isArray(playersJson)
+          ? playersJson
+          : [];
+
+        responseData._players = playersArr;
+      } catch (e) {
+        // ignore – normalize faller tillbaka på stats-payloaden
+      }
 
       const { femaleData, maleData } = normalize(responseData || {});
+
+      const isFullyRatedRow = (r = {}) => {
+        if (typeof r.fullyRated === "boolean") return r.fullyRated;
+        if (typeof r.isFullyRated === "boolean") return r.isFullyRated;
+        if (typeof r.allRated === "boolean") return r.allRated;
+        // fallback: om quality finns och är > 0, betrakta den som betygsatt
+        if (typeof r.quality === "number") return r.quality > 0;
+        return true;
+      };
 
       const decorate = (rows = []) =>
         rows.map((r) => {
@@ -213,16 +326,14 @@ export default function StatistikDistrikt() {
           return {
             ...r,
             name: resolvedName,
-            camp1: r.camp1 ?? 0,
-            camp2: r.camp2 ?? 0,
-            camp3: r.camp3 ?? 0,
-            camp4: r.camp4 ?? 0,
-            camp5: r.camp5 ?? 0,
           };
         });
 
-      const female = decorate(femaleData);
-      const male = decorate(maleData);
+      const femaleAll = decorate(femaleData);
+      const maleAll = decorate(maleData);
+
+      const female = onlyFullyRated ? femaleAll.filter(isFullyRatedRow) : femaleAll;
+      const male = onlyFullyRated ? maleAll.filter(isFullyRatedRow) : maleAll;
 
       setFemaleData(female);
       setMaleData(male);
