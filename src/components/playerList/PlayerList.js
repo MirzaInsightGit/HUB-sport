@@ -289,77 +289,77 @@ const PlayerList = () => {
         console.warn('[PlayerList] T-shirt enrichment skipped:', e?.message || e);
       }
 
-      // --- Enrich missing registeredCamps from Woo (using ENV mapping) ---
+      // --- Enrich registeredCamps from Woo (using ENV mapping, OR med befintliga) ---
       try {
-        const needsRegs = (players || []).some(p => !Array.isArray(p.registeredCamps) || p.registeredCamps.every(v => !v));
-        if (needsRegs) {
-          const seasonStart = new Date(SEASON_START);
-          const seasonEnd   = new Date(SEASON_END);
+        const seasonStart = new Date(SEASON_START);
+        const seasonEnd   = new Date(SEASON_END);
 
-          const orders = await fetchAllOrders({
-            status: 'completed,processing,on-hold',
-            after: seasonStart.toISOString(),
-            before: seasonEnd.toISOString()
-          });
+        const orders = await fetchAllOrders({
+          status: 'completed,processing,on-hold',
+          after: seasonStart.toISOString(),
+          before: seasonEnd.toISOString()
+        });
 
-          const campMap = (CAMP_ID_MAP_RAW || '')
-            .split(',')
-            .map(s => s.trim())
-            .filter(Boolean)
-            .reduce((m, pair) => {
-              const [id, idx] = pair.split(':');
-              const pid = Number(id);
-              const pidx = Number(idx);
-              if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
-              return m;
-            }, {});
+        const campMap = (CAMP_ID_MAP_RAW || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean)
+          .reduce((m, pair) => {
+            const [id, idx] = pair.split(':');
+            const pid = Number(id);
+            const pidx = Number(idx);
+            if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
+            return m;
+          }, {});
 
-          const flagsFromLineItems = (items = []) => {
-            const flags = [false, false, false, false, false];
-            for (const li of (items || [])) {
-              const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
-              idsToCheck.forEach(id => {
-                const idx = campMap[id];
-                if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
-                  flags[idx] = true;
-                }
-              });
-            }
-            return flags;
-          };
-
-          const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
-          const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
-
-          // Build lookups OR-ing multiple orders
-          const emailToFlags = new Map();
-          const phoneToFlags = new Map();
-          for (const o of orders) {
-            const flags = flagsFromLineItems(o.line_items);
-            if (!flags.some(Boolean)) continue;
-            const em = getPlayerEmail(o);
-            const ph = getPlayerPhone(o);
-            if (em) {
-              const prev = emailToFlags.get(em) || [false,false,false,false,false];
-              emailToFlags.set(em, prev.map((v,i) => v || flags[i]));
-            }
-            if (ph) {
-              const prev = phoneToFlags.get(ph) || [false,false,false,false,false];
-              phoneToFlags.set(ph, prev.map((v,i) => v || flags[i]));
-            }
+        const flagsFromLineItems = (items = []) => {
+          const flags = [false, false, false, false, false];
+          for (const li of (items || [])) {
+            const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
+            idsToCheck.forEach(id => {
+              const idx = campMap[id];
+              if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
+                flags[idx] = true;
+              }
+            });
           }
+          return flags;
+        };
 
-          players = players.map(p => {
-            const hasRegs = Array.isArray(p.registeredCamps) && p.registeredCamps.some(Boolean);
-            if (hasRegs) return p;
-            const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
-            const ph = normalizePhone(p.mobilnummer || p.phone);
-            const byEmail = em && emailToFlags.get(em);
-            const byPhone = ph && phoneToFlags.get(ph);
-            const flags = byEmail || byPhone || null;
-            return (flags ? { ...p, registeredCamps: flags } : p);
-          });
+        const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
+        const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
+
+        // Bygg upp kartor med OR över alla ordrar för varje spelare (e-post/telefon)
+        const emailToFlags = new Map();
+        const phoneToFlags = new Map();
+        for (const o of orders) {
+          const flags = flagsFromLineItems(o.line_items);
+          if (!flags.some(Boolean)) continue;
+          const em = getPlayerEmail(o);
+          const ph = getPlayerPhone(o);
+          if (em) {
+            const prev = emailToFlags.get(em) || [false,false,false,false,false];
+            emailToFlags.set(em, prev.map((v,i) => v || flags[i]));
+          }
+          if (ph) {
+            const prev = phoneToFlags.get(ph) || [false,false,false,false,false];
+            phoneToFlags.set(ph, prev.map((v,i) => v || flags[i]));
+          }
         }
+
+        players = players.map(p => {
+          const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
+          const ph = normalizePhone(p.mobilnummer || p.phone);
+          const byEmail = em && emailToFlags.get(em);
+          const byPhone = ph && phoneToFlags.get(ph);
+          const flags = byEmail || byPhone || null;
+          if (!flags) return p;
+
+          const existing = Array.isArray(p.registeredCamps) ? p.registeredCamps : [false,false,false,false,false];
+          const merged = [0,1,2,3,4].map(i => !!((existing[i] || false) || (flags[i] || false)));
+
+          return { ...p, registeredCamps: merged };
+        });
       } catch (e) {
         console.warn('[PlayerList] registeredCamps enrichment skipped:', e?.message || e);
       }
