@@ -300,24 +300,32 @@ const PlayerList = () => {
           before: seasonEnd.toISOString()
         });
 
+        // Bygg upp campMap från env där värdet redan är 0‑baserat (0 = Läger 1).
+        // Nycklarna är alltid strängar och kan vara product_id, variation_id eller SKU.
         const campMap = (CAMP_ID_MAP_RAW || '')
           .split(',')
           .map(s => s.trim())
           .filter(Boolean)
           .reduce((m, pair) => {
-            const [id, idx] = pair.split(':');
-            const pid = Number(id);
-            const pidx = Number(idx);
-            if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
+            const [idKeyRaw, idxRaw] = pair.split(':');
+            const idKey = String(idKeyRaw || '').trim();
+            const campIdx = Number(idxRaw);
+            if (!idKey) return m;
+            if (!Number.isInteger(campIdx) || campIdx < 0 || campIdx > 4) return m;
+            m[idKey] = campIdx;
             return m;
           }, {});
 
         const flagsFromLineItems = (items = []) => {
           const flags = [false, false, false, false, false];
           for (const li of (items || [])) {
-            const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
-            idsToCheck.forEach(id => {
-              const idx = campMap[id];
+            const idsToCheck = [
+              li?.variation_id != null ? String(li.variation_id).trim() : '',
+              li?.product_id   != null ? String(li.product_id).trim()   : '',
+              li?.sku ? String(li.sku).trim() : ''
+            ].filter(Boolean);
+            idsToCheck.forEach(key => {
+              const idx = campMap[key];
               if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
                 flags[idx] = true;
               }
@@ -417,24 +425,31 @@ const PlayerList = () => {
           };
 
           // Map product/variation -> camp index from ENV (e.g. "18611:0,19008:0,19009:0")
+          // Samma campMap-logik som ovan: 0‑baserad index, strängnycklar (product_id, variation_id eller SKU).
           const campMap = (CAMP_ID_MAP_RAW || '')
             .split(',')
             .map(s => s.trim())
             .filter(Boolean)
             .reduce((m, pair) => {
-              const [id, idx] = pair.split(':');
-              const pid = Number(id);
-              const pidx = Number(idx);
-              if (Number.isInteger(pid) && Number.isInteger(pidx)) m[pid] = pidx;
+              const [idKeyRaw, idxRaw] = pair.split(':');
+              const idKey = String(idKeyRaw || '').trim();
+              const campIdx = Number(idxRaw);
+              if (!idKey) return m;
+              if (!Number.isInteger(campIdx) || campIdx < 0 || campIdx > 4) return m;
+              m[idKey] = campIdx;
               return m;
             }, {});
 
           const flagsFromLineItems = (items = []) => {
             const flags = [false, false, false, false, false];
             for (const li of (items || [])) {
-              const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
-              idsToCheck.forEach(id => {
-                const idx = campMap[id];
+              const idsToCheck = [
+                li?.variation_id != null ? String(li.variation_id).trim() : '',
+                li?.product_id   != null ? String(li.product_id).trim()   : '',
+                li?.sku ? String(li.sku).trim() : ''
+              ].filter(Boolean);
+              idsToCheck.forEach(key => {
+                const idx = campMap[key];
                 if (Number.isInteger(idx) && idx >= 0 && idx < 5) {
                   flags[idx] = true;
                 }
