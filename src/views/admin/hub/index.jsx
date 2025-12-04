@@ -72,6 +72,7 @@ const DLT_SEASON_END   = new Date(process.env.REACT_APP_DLT_SEASON_END   || '202
 // --- Camp capacity config (frontend fallback) ---
 const CAMP_CAPACITY = { 'Läger 1': 176, 'Läger 2': 176, 'Läger 3': 176 };
 const CAMP_TOTAL_CAP = Object.values(CAMP_CAPACITY).reduce((a, b) => a + b, 0);
+const DLT_CAMP_ID_MAP_RAW = process.env.REACT_APP_DLT_CAMP_ID_MAP || process.env.REACT_APP_CAMP_ID_MAP || '';
 
 export default function UserReports() {
   // Chakra Color Mode
@@ -258,14 +259,30 @@ export default function UserReports() {
   };
 
   const tallyCampsWithCapacity = (orders) => {
-    // Keys we accept for camp detection in order or line-item meta
+    // Keys we accept for camp detection in order or line-item meta (fallback)
     const campKeys = [
       'dlt_lager','dlt_läger','lager','läger','camp','tryout',
       'camp_name','campname','lagernamn','lägernamn','läger namn','läger-nummer','lager-nummer'
     ];
 
-    // Helpers
-    const lcSet = new Set(campKeys.map(k => String(k).toLowerCase()));
+    // Bygg ID -> läger-nyckel karta från env, t.ex. "18611:1,19008:2" => { 18611: 'Läger 1', 19008: 'Läger 2' }
+    const idMap = (DLT_CAMP_ID_MAP_RAW || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .reduce((m, pair) => {
+        const [id, idx] = pair.split(':');
+        const pid = Number(id);
+        const campIdx = Number(idx);
+        if (Number.isInteger(pid) && Number.isInteger(campIdx)) {
+          const campKey = `Läger ${campIdx}`;
+          if (CAMP_CAPACITY[campKey] != null) m[pid] = campKey;
+        }
+        return m;
+      }, {});
+
+    // Helpers för fallback via meta/namn
+    const lcSet = new Set(campKeys.map((k) => String(k).toLowerCase()));
     const getCampFromMeta = (meta) => {
       for (const m of meta || []) {
         const k = String(m?.key || '').toLowerCase();
@@ -279,24 +296,45 @@ export default function UserReports() {
     const getCampFromName = (name) => {
       const n = String(name || '').toLowerCase();
       // ex: "DLT Läger 1", "Tryout - Läger 2", etc.
-      const m = n.match(/läger\s*(1|2|3)/i) || n.match(/lager\s*(1|2|3)/i) || n.match(/camp\s*(1|2|3)/i);
+      const m =
+        n.match(/läger\s*(1|2|3)/i) ||
+        n.match(/lager\s*(1|2|3)/i) ||
+        n.match(/camp\s*(1|2|3)/i);
       if (m) return `Läger ${m[1]}`;
       return '';
     };
 
-    const counts = new Map(Object.keys(CAMP_CAPACITY).map(k => [k, 0]));
+    const counts = new Map(Object.keys(CAMP_CAPACITY).map((k) => [k, 0]));
 
     (orders || []).forEach((o) => {
-      // First, try order-level meta for a default camp
+      // Order-level meta kan innehålla lägernamn (fallback)
       const orderCamp = getCampFromMeta(o?.meta_data);
 
       (o?.line_items || []).forEach((li) => {
         const qty = Number(li?.quantity || 0);
         if (!qty) return;
-        // Priority: line-item meta -> order meta -> product name regex
-        const liCamp = getCampFromMeta(li?.meta_data) || orderCamp || getCampFromName(li?.name);
-        const key = CAMP_CAPACITY[liCamp] != null ? liCamp : '';
-        if (key) counts.set(key, (counts.get(key) || 0) + qty);
+
+        // 1) Försök mappa via variation_id / product_id
+        const idsToCheck = [Number(li?.variation_id), Number(li?.product_id)];
+        let key = '';
+        for (const id of idsToCheck) {
+          if (!id) continue;
+          const mapped = idMap[id];
+          if (mapped) {
+            key = mapped;
+            break;
+          }
+        }
+
+        // 2) Fallback: meta/namn (som tidigare)
+        if (!key) {
+          const liCamp = getCampFromMeta(li?.meta_data) || orderCamp || getCampFromName(li?.name);
+          if (CAMP_CAPACITY[liCamp] != null) key = liCamp;
+        }
+
+        if (key) {
+          counts.set(key, (counts.get(key) || 0) + qty);
+        }
       });
     });
 
