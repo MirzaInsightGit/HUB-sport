@@ -17,6 +17,10 @@ const DLT_CATEGORY_ID = process.env.REACT_APP_DLT_CATEGORY_ID || 'dlt';
 const CAMP_ID_MAP_RAW = process.env.REACT_APP_CAMP_ID_MAP     || '';
 const SEASON_START    = process.env.REACT_APP_DLT_SEASON_START || '2025-08-01T00:00:00Z';
 const SEASON_END      = process.env.REACT_APP_DLT_SEASON_END   || '2026-08-01T23:59:59Z';
+
+const DEBUG_DISABLE_CACHE = false;         // enable session cache in production for faster reloads
+const ENABLE_TSHIRT_ENRICHMENT = false;   // can be toggled on again when T-shirt sync is verified
+const ENABLE_WOO_FALLBACK = true;         // Woo fallback (extra orders + products) – needed när /district/players missar många
 // Build MSAL scopes safely (avoid "api:///.default" when env is missing)
 const buildScopes = () => {
   if (API_SCOPE && String(API_SCOPE).trim()) {
@@ -52,6 +56,7 @@ const idCandidates = (p = {}) => {
 const __CACHE_NS = 'hub-cache.v2';
 const makeKey = (key, coachId, tenantId = 'single') => `${__CACHE_NS}::${tenantId}::${coachId || 'anon'}::${key}`;
 const getCache = (fullKey) => {
+  if (DEBUG_DISABLE_CACHE) return null;
   try {
     const raw = sessionStorage.getItem(fullKey);
     if (!raw) return null;
@@ -67,6 +72,7 @@ const getCache = (fullKey) => {
   } catch { return null; }
 };
 const setCache = (fullKey, data, ttlMs) => {
+  if (DEBUG_DISABLE_CACHE) return;
   try { sessionStorage.setItem(fullKey, JSON.stringify({ ts: Date.now(), ttl: ttlMs, data })); } catch {}
 };
 
@@ -223,6 +229,9 @@ const PlayerList = () => {
       let page = 1;
       const per_page = 250;
       let players = [];
+      // Aggregated camp flags from Woo orders (reused after Woo-fallback as well)
+      let emailToFlags = new Map();
+      let phoneToFlags = new Map();
       for (;;) {
         const { data } = await axios.get(`${API_BASE}/district/players`, {
           params: { page, per_page }
@@ -240,50 +249,52 @@ const PlayerList = () => {
 
       // --- Enrich missing T-shirt sizes from Woo orders (no dedupe changes) ---
       try {
-        const needsTshirt = (players || []).some(p => !p.tshirt_storlek && !p.tshirt && !p.tshirtSize);
-        if (needsTshirt) {
-          const seasonStart = new Date(SEASON_START);
-          const seasonEnd   = new Date(SEASON_END);
+        if (ENABLE_TSHIRT_ENRICHMENT) {
+          const needsTshirt = (players || []).some(p => !p.tshirt_storlek && !p.tshirt && !p.tshirtSize);
+          if (needsTshirt) {
+            const seasonStart = new Date(SEASON_START);
+            const seasonEnd   = new Date(SEASON_END);
 
-          // Pull all orders in season
-          const orders = await fetchAllOrders({
-            status: 'completed,processing,on-hold',
-            after: seasonStart.toISOString(),
-            before: seasonEnd.toISOString()
-          });
+            // Pull all orders in season
+            const orders = await fetchAllOrders({
+              status: 'completed,processing,on-hold',
+              after: seasonStart.toISOString(),
+              before: seasonEnd.toISOString()
+            });
 
-          // Helpers
-          const flattenAttrs = (items) => (items || []).flatMap(li => Array.isArray(li.attributes) ? li.attributes : []);
-          const findTshirtAttr = (attrs) => {
-            for (const a of attrs) {
-              const name = String(a?.name || '').toLowerCase();
-              if (/t.?shirt|storlek|size/.test(name)) return (a?.option || '').toString().trim();
+            // Helpers
+            const flattenAttrs = (items) => (items || []).flatMap(li => Array.isArray(li.attributes) ? li.attributes : []);
+            const findTshirtAttr = (attrs) => {
+              for (const a of attrs) {
+                const name = String(a?.name || '').toLowerCase();
+                if (/t.?shirt|storlek|size/.test(name)) return (a?.option || '').toString().trim();
+              }
+              return '';
+            };
+            const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
+            const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
+
+            // Build lookup maps by email and phone
+            const emailToSize = new Map();
+            const phoneToSize = new Map();
+            for (const o of orders) {
+              const size = getMetaDeep(o, ['dlt_tshirt','dlt_tshirtstorlek','tshirt','t-shirt','t_shirt','storlek','tshirtstorlek']) || findTshirtAttr(flattenAttrs(o.line_items));
+              if (!size) continue;
+              const em = getPlayerEmail(o);
+              const ph = getPlayerPhone(o);
+              if (em) emailToSize.set(em, size);
+              if (ph) phoneToSize.set(ph, size);
             }
-            return '';
-          };
-          const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
-          const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
 
-          // Build lookup maps by email and phone
-          const emailToSize = new Map();
-          const phoneToSize = new Map();
-          for (const o of orders) {
-            const size = getMetaDeep(o, ['dlt_tshirt','dlt_tshirtstorlek','tshirt','t-shirt','t_shirt','storlek','tshirtstorlek']) || findTshirtAttr(flattenAttrs(o.line_items));
-            if (!size) continue;
-            const em = getPlayerEmail(o);
-            const ph = getPlayerPhone(o);
-            if (em) emailToSize.set(em, size);
-            if (ph) phoneToSize.set(ph, size);
+            // Enrich players in-place
+            players = players.map(p => {
+              if (p.tshirt_storlek || p.tshirt || p.tshirtSize) return p;
+              const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
+              const ph = normalizePhone(p.mobilnummer || p.phone);
+              const size = (em && emailToSize.get(em)) || (ph && phoneToSize.get(ph)) || '';
+              return size ? { ...p, tshirt_storlek: size } : p;
+            });
           }
-
-          // Enrich players in-place
-          players = players.map(p => {
-            if (p.tshirt_storlek || p.tshirt || p.tshirtSize) return p;
-            const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
-            const ph = normalizePhone(p.mobilnummer || p.phone);
-            const size = (em && emailToSize.get(em)) || (ph && phoneToSize.get(ph)) || '';
-            return size ? { ...p, tshirt_storlek: size } : p;
-          });
         }
       } catch (e) {
         console.warn('[PlayerList] T-shirt enrichment skipped:', e?.message || e);
@@ -315,6 +326,11 @@ const PlayerList = () => {
             m[idKey] = campIdx;
             return m;
           }, {});
+        if (Object.keys(campMap).length === 0) {
+          console.warn('[DLT debug] CAMP_ID_MAP tom – inga lägerflaggor sätts från Woo. Rå env:', CAMP_ID_MAP_RAW);
+        } else {
+          console.log('[DLT debug] CAMP_ID_MAP parsed (orders->flags):', campMap);
+        }
 
         const flagsFromLineItems = (items = []) => {
           const flags = [false, false, false, false, false];
@@ -334,12 +350,28 @@ const PlayerList = () => {
           return flags;
         };
 
-        const getPlayerEmail = (o) => getMetaDeep(o, ['dlt_spelarmejl','dlt_email','spelarmejl','player_email','spelare_email','spelarens_email','spelarens_mejl']).toLowerCase();
-        const getPlayerPhone = (o) => normalizePhone(getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']) || o?.billing?.phone);
+        const getPlayerEmail = (o) => {
+          const metaMail = getMetaDeep(o, [
+            'dlt_spelarmejl',
+            'dlt_email',
+            'spelarmejl',
+            'player_email',
+            'spelare_email',
+            'spelarens_email',
+            'spelarens_mejl'
+          ]);
+          const billingMail = (o?.billing?.email || '').toString().trim();
+          return (metaMail || billingMail || '').toLowerCase();
+        };
+        const getPlayerPhone = (o) => {
+          const metaPhone = getMetaDeep(o, ['dlt_mobilnummer','mobilnummer','telefon','phone']);
+          const billingPhone = o?.billing?.phone || '';
+          return normalizePhone(metaPhone || billingPhone);
+        };
 
         // Bygg upp kartor med OR över alla ordrar för varje spelare (e-post/telefon)
-        const emailToFlags = new Map();
-        const phoneToFlags = new Map();
+        emailToFlags = new Map();
+        phoneToFlags = new Map();
         for (const o of orders) {
           const flags = flagsFromLineItems(o.line_items);
           if (!flags.some(Boolean)) continue;
@@ -356,11 +388,26 @@ const PlayerList = () => {
         }
 
         players = players.map(p => {
-          const em = (p.spelarmejl || p.playerEmail || '').toLowerCase();
-          const ph = normalizePhone(p.mobilnummer || p.phone);
+          const em = (
+            p.spelarmejl ||
+            p.playerEmail ||
+            p.email ||
+            p.parentEmail ||
+            ''
+          ).toLowerCase();
+          const ph = normalizePhone(p.mobilnummer || p.phone || p.parentPhone);
           const byEmail = em && emailToFlags.get(em);
           const byPhone = ph && phoneToFlags.get(ph);
           const flags = byEmail || byPhone || null;
+          if (!flags && (em || ph)) {
+            console.warn('[PlayerList] Inga lägerflaggor hittades för spelare trots kontaktdata', {
+              namn: p.spelarnamn,
+              email: em,
+              phone: ph,
+              source: p.source,
+              jersey: p.jerseyNumber
+            });
+          }
           if (!flags) return p;
 
           const existing = Array.isArray(p.registeredCamps) ? p.registeredCamps : [false,false,false,false,false];
@@ -375,7 +422,7 @@ const PlayerList = () => {
 
       // Fallback/komplettering (AVSTÄNGD som standard):
       // Kör alltid om färre än 130 spelare är laddade.
-      if (players.length < 130) {
+      if (ENABLE_WOO_FALLBACK && players.length < 130) {
         console.warn('[PlayerList] Fallback aktiverad: endast', players.length, 'spelare från /district/players. Kompletterar via Woo orders...');
         try {
           // Säsong (Aug 1 -> Aug 1)
@@ -549,6 +596,31 @@ const PlayerList = () => {
         }
       }
 
+      // Second pass: säkerställ att alla spelare (inkl. Woo-fallback) får aggregerade lägerflaggor via e‑post/telefon
+      if (emailToFlags.size || phoneToFlags.size) {
+        players = players.map(p => {
+          const em = (
+            p.spelarmejl ||
+            p.playerEmail ||
+            p.email ||
+            p.parentEmail ||
+            ''
+          ).toLowerCase();
+          const ph = normalizePhone(p.mobilnummer || p.phone || p.parentPhone);
+
+          const existing = Array.isArray(p.registeredCamps) ? p.registeredCamps : [false, false, false, false, false];
+          const byEmail = em && emailToFlags.get(em);
+          const byPhone = ph && phoneToFlags.get(ph);
+          const flags = byEmail || byPhone;
+
+          if (!flags) return p;
+
+          const merged = [0, 1, 2, 3, 4].map(i => !!((existing[i] || false) || (flags[i] || false)));
+
+          return { ...p, registeredCamps: merged };
+        });
+      }
+
       // Tagga källa för dedupe (backend)
       players = players.map(p => ({ ...p, source: p.source || 'backend' }));
 
@@ -576,7 +648,8 @@ const PlayerList = () => {
 
       // Normalisera rader så index-åtkomst aldrig spricker och fyll i saknade fält från meta/alternativa namn
       const normalize = (p) => {
-        const regs = Array.isArray(p.registeredCamps) && p.registeredCamps.length === 5 ? p.registeredCamps : [false,false,false,false,false];
+        let regs = Array.isArray(p.registeredCamps) ? p.registeredCamps.slice(0, 5) : [];
+        while (regs.length < 5) regs.push(false);
         const ratings = Array.isArray(p.ratings) && p.ratings.length === 5 ? p.ratings : [{},{},{},{},{}];
         const comments = Array.isArray(p.comments) && p.comments.length === 5
           ? p.comments
@@ -699,49 +772,43 @@ const PlayerList = () => {
         return { ...n, isFavorite: fav };
       });
       console.log('[PlayerList] total players loaded:', playersWithFav.length);
-      // Dedupe per spelare: robust gruppnyckel (email, annars phone, annars year, annars name)
-      const richness = (p) => [p.spelarmejl,p.mobilnummer,p.tshirt_storlek,p.klubblag,p.basket_position,p.aktuellserie].filter(x => x && String(x).trim()).length;
-      const groups = new Map();
+      const richness = (p) => [p.spelarmejl,p.mobilnummer,p.tshirt_storlek,p.klubblag,p.basket_position,p.aktuellserie]
+        .filter(x => x && String(x).trim()).length;
+
+      // Endast dedupe på starka nycklar (e‑post eller telefon).
+      // Spelare utan mejl/telefon får ALWAYS en egen rad.
+      const strongGroups = new Map();
+      const noKeyPlayers = [];
+
       for (const p of playersWithFav) {
         const emailKey = (p.spelarmejl || '').toString().trim().toLowerCase();
         const phoneKey = String(p.mobilnummer || '').replace(/\D+/g, '');
-        const yearKey  = String(p.alderspelare || '').trim();
-        const nameKey  = (p.spelarnamn || '').toString().trim().toLowerCase();
-        const clubKey  = (p.klubblag || '').toString().trim().toLowerCase();
-        const serieKey = (p.aktuellserie || '').toString().trim().toLowerCase();
 
-        let key;
-        if (emailKey) {
-          key = `e:${emailKey}`; // 1) unikt på spelarens e-post
-        } else if (phoneKey) {
-          key = `p:${phoneKey}`; // 2) annars telefon (normaliserad)
-        } else if (yearKey) {
-          key = `y:${yearKey}|n:${nameKey}|k:${clubKey}|s:${serieKey}`; // 3) år + namn + klubb + serie
-        } else {
-          key = `n:${nameKey}|k:${clubKey}|s:${serieKey}`; // 4) namn + klubb + serie
+        if (!emailKey && !phoneKey) {
+          // ingen stark identitet -> lägg direkt i listan, ingen sammanslagning
+          noKeyPlayers.push(p);
+          continue;
         }
 
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(p);
+        const key = emailKey ? `e:${emailKey}` : `p:${phoneKey}`;
+        if (!strongGroups.has(key)) strongGroups.set(key, []);
+        strongGroups.get(key).push(p);
       }
-      const deduped = [];
-      for (const [, arr] of groups.entries()) {
-        // välj bästa kandidat i gruppen
+
+      const deduped = [...noKeyPlayers];
+
+      for (const [, arr] of strongGroups.entries()) {
+        // välj bästa kandidat i gruppen med samma e‑post/telefon
         let best = arr[0];
-        // Debug: warn if we merged players without reliable email/phone keys
-        if (arr.length > 1) {
-          const hasReliable = arr.some(x => (x.spelarmejl && x.spelarmejl !== x.email) || String(x.mobilnummer||'').replace(/\D+/g,'').length > 0);
-          if (!hasReliable) {
-            console.warn('[PlayerList] Possible soft-duplicate group merged (no email/phone). Candidates:', arr.map(a => ({ namn:a.spelarnamn, ar:a.alderspelare, klubb:a.klubblag, serie:a.aktuellserie })));
-          }
-        }
         const hasPlayerEmail = (x) => !!(x.spelarmejl && x.spelarmejl !== x.email);
         const hasPhone = (x) => !!normalizePhone(x.mobilnummer);
+
         for (const x of arr) {
           const byEmail = Number(hasPlayerEmail(x)) - Number(hasPlayerEmail(best));
           const byPhone = Number(hasPhone(x)) - Number(hasPhone(best));
           const byRich = richness(x) - richness(best);
           const bySource = (best.source === 'backend' ? 0 : -1) - (x.source === 'backend' ? 0 : -1); // prefer backend on tie
+
           if (
             byEmail > 0 ||
             (byEmail === 0 && (
@@ -752,8 +819,10 @@ const PlayerList = () => {
             best = x;
           }
         }
+
         deduped.push(best);
       }
+
       console.log('[PlayerList] deduped count:', { before: playersWithFav.length, after: deduped.length });
 
       // ---- Hydrate favorites with latest ratings/comments from Cosmos ----------
@@ -810,7 +879,7 @@ const PlayerList = () => {
         console.warn('[PlayerList] hydration skipped:', e?.message || e);
       }
 
-      setCache(CACHE_KEY, { rows: merged }, 10 * 60 * 1000); // 10 min TTL
+      setCache(CACHE_KEY, { rows: merged }, 10 * 60 * 1000); // 10 min TTL (no-op while DEBUG_DISABLE_CACHE = true)
       setRowData(merged);
       setIsLoading(false);
     } catch (error) {
