@@ -69,7 +69,7 @@ function getInitialNotifications() {
   return [
     {
       id: 1,
-      title: 'Välkommen till HUB-Sport!',
+      title: 'Välkommen till HUBEN!',
       message: 'Detta är en testnotis för adminsidan.',
       priority: 'medium',
       status: 'published',
