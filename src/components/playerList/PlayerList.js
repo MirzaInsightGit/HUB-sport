@@ -1633,7 +1633,7 @@ const PlayerList = () => {
           }}>Uppdatera lista</Button>
         </Flex>
       </Flex>
-      <Text mb='4' color='secondaryGray.700'>Ha tålamod, det tar en stund att ladda alla spelare.
+      <Text mb='4' color='secondaryGray.700'>Ha tålamod, det tar en stund att ladda alla spelare om det är många.
       </Text>
 
       <style>
